@@ -1,0 +1,6 @@
+{
+  "name": "商品卡片智能账单识别",
+  "description": "上传包含商品卡片或账单单据的图片，自动框选每一张商品卡片矩形框，高精度识别金额与日期",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
