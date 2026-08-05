@@ -112,8 +112,7 @@ Return JSON format with a 'cards' array.`;
       "gemini-2.5-flash",
       "gemini-2.0-flash",
       "gemini-1.5-flash",
-      "gemini-2.5-pro",
-      "gemini-1.5-pro"
+      "gemini-3.6-flash"
     ].filter((v, i, a) => v && a.indexOf(v) === i);
 
     let response: any = null;
@@ -186,7 +185,14 @@ Return JSON format with a 'cards' array.`;
 
     if (!response || !response.text) {
       console.error("All Gemini models failed. Last error:", lastError);
-      res.status(200).json(generateFallbackGridDetection(`Gemini API 异常: ${lastError?.message || '模型调用失败，请检查 GEMINI_API_KEY 配置'}`));
+      let rawErr = lastError?.message || '';
+      let userFriendlyMsg = `Gemini API 调用异常: ${rawErr || '无法连接 Gemini 服务'}`;
+      if (rawErr.includes('429') || rawErr.includes('RESOURCE_EXHAUSTED') || rawErr.includes('Quota')) {
+        userFriendlyMsg = 'Gemini API 免费层级调用频次超限 (429 Quota Exceeded)。请等待1-2分钟后再试！';
+      } else if (rawErr.includes('API key') || rawErr.includes('401') || rawErr.includes('403') || rawErr.includes('API_KEY_INVALID')) {
+        userFriendlyMsg = 'Gemini API_KEY 无效或受限，请在 Vercel 中检查 GEMINI_API_KEY 配置。';
+      }
+      res.status(200).json(generateFallbackGridDetection(userFriendlyMsg));
       return;
     }
 
