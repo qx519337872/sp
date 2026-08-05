@@ -106,12 +106,15 @@ Return JSON format with a 'cards' array.`;
 
     const textPart = { text: promptText };
 
+    const configuredModel = process.env.GEMINI_MODEL?.trim();
     const candidateModels = [
+      ...(configuredModel ? [configuredModel] : []),
       "gemini-2.5-flash",
-      "gemini-3.6-flash",
-      "gemini-2.5-flash",
-      "gemini-flash-latest"
-    ];
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      "gemini-2.5-pro",
+      "gemini-1.5-pro"
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
 
     let response: any = null;
     let lastError: any = null;
