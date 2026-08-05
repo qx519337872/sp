@@ -8,17 +8,97 @@ const app = express();
 
 app.use(express.json({ limit: "25mb" }));
 
-function getGeminiClient() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
+function getGeminiClients(): { client: GoogleGenAI; keyId: string }[] {
+  const rawKeys = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "").trim();
+  const baseUrl = (process.env.GEMINI_BASE_URL || process.env.GEMINI_API_BASE)?.trim();
+  const keys = rawKeys
+    .split(",")
+    .map(k => k.trim())
+    .filter(Boolean);
+
+  if (keys.length === 0) return [];
+
+  return keys.map((apiKey, idx) => ({
+    keyId: `Key-${idx + 1}`,
+    client: new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        ...(baseUrl ? { baseUrl } : {}),
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
       }
-    }
+    })
+  }));
+}
+
+async function callRelayAPI(cleanBase64: string, mimeType: string, promptText: string): Promise<string | null> {
+  const apiKey = (
+    process.env.RELAY_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    process.env.SILICONFLOW_API_KEY
+  )?.trim();
+
+  if (!apiKey) return null;
+
+  let baseUrl = (
+    process.env.RELAY_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    process.env.OPENAI_API_BASE ||
+    "https://api.openai.com/v1"
+  ).trim();
+
+  baseUrl = baseUrl.replace(/\/+$/, '');
+  if (!baseUrl.endsWith('/v1')) {
+    baseUrl += '/v1';
+  }
+
+  const model = (
+    process.env.RELAY_MODEL ||
+    process.env.OPENAI_MODEL ||
+    "gemini-2.5-flash"
+  ).trim();
+
+  console.log(`Attempting Relay API call (${baseUrl}) with model '${model}'...`);
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${mimeType};base64,${cleanBase64}`
+              }
+            },
+            {
+              type: "text",
+              text: promptText + "\nIMPORTANT: Return ONLY a JSON object containing a 'cards' array."
+            }
+          ]
+        }
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.1
+    })
   });
+
+  if (response.ok) {
+    const json = await response.json();
+    return json?.choices?.[0]?.message?.content || null;
+  } else {
+    const errText = await response.text();
+    console.warn(`Relay API returned HTTP ${response.status}:`, errText);
+    throw new Error(`中转/第三方 API 请求失败 (${response.status}): ${errText}`);
+  }
 }
 
 // Utility helper to evaluate amount expressions and equations safely
@@ -68,10 +148,11 @@ app.post("/api/detect-cards", async (req, res) => {
 
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
-    const ai = getGeminiClient();
+    const geminiClients = getGeminiClients();
+    const hasRelayKey = !!(process.env.RELAY_API_KEY || process.env.OPENAI_API_KEY || process.env.SILICONFLOW_API_KEY);
 
-    if (!ai) {
-      res.status(400).json({ error: "服务器未配置 GEMINI_API_KEY 环境变量，请配置环境变量后重试" });
+    if (geminiClients.length === 0 && !hasRelayKey) {
+      res.status(400).json({ error: "服务器未配置 GEMINI_API_KEY 或 RELAY_API_KEY 环境变量" });
       return;
     }
 
@@ -89,81 +170,102 @@ For EACH card detected:
 
 Return JSON format with a 'cards' array.`;
 
-    const imagePart = {
-      inlineData: {
-        data: cleanBase64,
-        mimeType: mimeType,
-      }
-    };
-    const textPart = { text: promptText };
-
-    const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 8000): Promise<T> => {
-      return Promise.race([
-        promise,
-        new Promise<T>((_, reject) =>
-          setTimeout(() => reject(new Error(`Gemini API request timed out (${timeoutMs}ms)`)), timeoutMs)
-        ),
-      ]);
-    };
-
-    const configuredModel = process.env.GEMINI_MODEL?.trim();
-    const candidateModels = [
-      ...(configuredModel ? [configuredModel] : []),
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-2.0-flash"
-    ].filter((v, i, a) => v && a.indexOf(v) === i);
-
     let responseText: string | null = null;
     let lastError: any = null;
 
-    for (const modelName of candidateModels) {
+    // 1. Try Relay API (OpenAI compatible) first if configured
+    if (hasRelayKey) {
       try {
-        console.log(`Attempting Gemini detection with model ${modelName}...`);
-        const response = await callWithTimeout(
-          ai.models.generateContent({
-            model: modelName,
-            contents: [imagePart, textPart],
-            config: {
-              temperature: 0.1,
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  cards: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        box_2d: {
-                          type: Type.ARRAY,
-                          items: { type: Type.INTEGER }
-                        },
-                        label: { type: Type.STRING },
-                        amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
-                        date: { type: Type.STRING },
-                        confidence: { type: Type.NUMBER }
-                      },
-                      required: ["box_2d"]
-                    }
-                  },
-                  summary_date: { type: Type.STRING },
-                  total_amount: { type: Type.NUMBER }
-                },
-                required: ["cards"]
-              }
-            }
-          }),
-          8000
-        );
-        if (response && response.text) {
-          console.log(`Success using Gemini model ${modelName}`);
-          responseText = response.text;
-          break;
+        responseText = await callRelayAPI(cleanBase64, mimeType, promptText);
+      } catch (relayErr: any) {
+        console.warn("Relay API call failed, falling back to Gemini SDK if available:", relayErr?.message || relayErr);
+        lastError = relayErr;
+      }
+    }
+
+    // 2. Try Gemini SDK if no response yet
+    if (!responseText && geminiClients.length > 0) {
+      const imagePart = {
+        inlineData: {
+          data: cleanBase64,
+          mimeType: mimeType,
         }
-      } catch (err: any) {
-        console.warn(`Gemini model '${modelName}' failed:`, err?.message || err);
-        lastError = err;
+      };
+      const textPart = { text: promptText };
+
+      const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 10000): Promise<T> => {
+        return Promise.race([
+          promise,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`Gemini API request timed out (${timeoutMs}ms)`)), timeoutMs)
+          ),
+        ]);
+      };
+
+      const configuredModel = process.env.GEMINI_MODEL?.trim();
+      const candidateModels = [
+        ...(configuredModel ? [configuredModel] : []),
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash-lite"
+      ].filter((v, i, a) => v && a.indexOf(v) === i);
+
+      keyLoop: for (const { client: ai, keyId } of geminiClients) {
+        for (const modelName of candidateModels) {
+          try {
+            console.log(`Attempting Gemini detection with key '${keyId}' and model '${modelName}'...`);
+            const response = await callWithTimeout(
+              ai.models.generateContent({
+                model: modelName,
+                contents: [imagePart, textPart],
+                config: {
+                  temperature: 0.1,
+                  responseMimeType: "application/json",
+                  responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                      cards: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            box_2d: {
+                              type: Type.ARRAY,
+                              items: { type: Type.INTEGER }
+                            },
+                            label: { type: Type.STRING },
+                            amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
+                            date: { type: Type.STRING },
+                            confidence: { type: Type.NUMBER }
+                          },
+                          required: ["box_2d"]
+                        }
+                      },
+                      summary_date: { type: Type.STRING },
+                      total_amount: { type: Type.NUMBER }
+                    },
+                    required: ["cards"]
+                  }
+                }
+              }),
+              10000
+            );
+            if (response && response.text) {
+              console.log(`Success using key '${keyId}' and Gemini model '${modelName}'`);
+              responseText = response.text;
+              break keyLoop;
+            }
+          } catch (err: any) {
+            const errMsg = err?.message || String(err);
+            console.warn(`Gemini model '${modelName}' with key '${keyId}' failed:`, errMsg);
+            lastError = err;
+            if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota')) {
+              console.warn(`Key '${keyId}' hit 429 Quota Exceeded. Switching to next Key...`);
+              break;
+            }
+          }
+        }
       }
     }
 
