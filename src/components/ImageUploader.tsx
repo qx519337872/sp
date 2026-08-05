@@ -1,13 +1,15 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
+import { AutoScanCameraModal } from './AutoScanCameraModal';
 
 interface Props {
-  onImageSelected: (base64: string, file: File) => void;
+  onImageSelected: (base64: string, file?: File) => void;
   isLoading: boolean;
 }
 
 export const ImageUploader: React.FC<Props> = ({ onImageSelected, isLoading }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [isAutoCameraOpen, setIsAutoCameraOpen] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -25,6 +27,19 @@ export const ImageUploader: React.FC<Props> = ({ onImageSelected, isLoading }) =
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleCameraClick = () => {
+    // Check if mediaDevices is supported, open auto camera modal; otherwise fallback to system camera file input
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      setIsAutoCameraOpen(true);
+    } else {
+      cameraInputRef.current?.click();
+    }
+  };
+
+  const handleAutoCaptured = (base64: string) => {
+    onImageSelected(base64);
   };
 
   return (
@@ -46,6 +61,13 @@ export const ImageUploader: React.FC<Props> = ({ onImageSelected, isLoading }) =
         onChange={handleFileChange}
       />
 
+      {/* Auto-Scan Camera Modal */}
+      <AutoScanCameraModal
+        isOpen={isAutoCameraOpen}
+        onClose={() => setIsAutoCameraOpen(false)}
+        onCapture={handleAutoCaptured}
+      />
+
       {/* Top Clipboard Icon & Text */}
       <div className="flex-1 flex flex-col items-center justify-center text-center my-auto">
         <div className="w-16 h-16 mb-4 flex items-center justify-center text-4xl">
@@ -56,7 +78,7 @@ export const ImageUploader: React.FC<Props> = ({ onImageSelected, isLoading }) =
         </p>
       </div>
 
-      {/* Bottom 2 Large Square Buttons */}
+      {/* Bottom 2 Large Square Buttons (Original UI Layout preserved) */}
       <div className="grid grid-cols-2 gap-4 w-full pt-8">
         {/* Select Photo Button */}
         <button
@@ -69,10 +91,10 @@ export const ImageUploader: React.FC<Props> = ({ onImageSelected, isLoading }) =
           <span className="text-sm font-bold text-[#333333]">选择照片</span>
         </button>
 
-        {/* Camera Button */}
+        {/* Camera Button with Integrated Auto Camera */}
         <button
           type="button"
-          onClick={() => cameraInputRef.current?.click()}
+          onClick={handleCameraClick}
           disabled={isLoading}
           className="flex flex-col items-center justify-center p-7 rounded-3xl bg-[#d6a5b5] hover:bg-[#c894a4] active:scale-95 transition-all shadow-sm"
         >
@@ -83,4 +105,3 @@ export const ImageUploader: React.FC<Props> = ({ onImageSelected, isLoading }) =
     </div>
   );
 };
-

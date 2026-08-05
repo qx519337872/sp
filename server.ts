@@ -47,9 +47,10 @@ app.post("/api/detect-cards", async (req, res) => {
       return;
     }
 
-    // Call Gemini 3.6 Flash for high-precision bounding box detection
+    // Call Gemini Vision model (configurable via GEMINI_MODEL env var on Vercel)
+    const geminiModelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: geminiModelName,
       contents: {
         parts: [
           {

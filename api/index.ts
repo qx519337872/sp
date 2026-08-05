@@ -39,8 +39,9 @@ app.post("/api/detect-cards", async (req, res) => {
       return;
     }
 
+    const geminiModelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: geminiModelName,
       contents: {
         parts: [
           {
