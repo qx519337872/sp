@@ -39,15 +39,17 @@ app.post("/api/detect-cards", async (req, res) => {
       return;
     }
 
-    let configuredModel = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
-    // Remove surrounding quotes if user entered them in Vercel UI
-    configuredModel = configuredModel.replace(/^["']|["']$/g, '');
+    let userModel = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim().replace(/^["']|["']$/g, '');
+    if (userModel.includes("3.6")) {
+      userModel = "gemini-2.5-flash";
+    }
 
     const candidateModels = [
-      configuredModel,
+      userModel,
       "gemini-2.5-flash",
+      "gemini-2.0-flash",
       "gemini-1.5-flash",
-    ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
+    ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx);
 
     let response: any = null;
     let lastError: any = null;
@@ -120,7 +122,7 @@ For EACH card detected:
 
     if (!response || !response.text) {
       console.error("All Gemini models failed. Last error:", lastError);
-      res.status(200).json(generateFallbackGridDetection(`Gemini API Error: ${lastError?.message || 'Model call failed'}`));
+      res.status(200).json(generateFallbackGridDetection(`Gemini API 异常: ${lastError?.message || '模型调用失败，请检查 GEMINI_API_KEY 配置'}`));
       return;
     }
 
@@ -195,7 +197,7 @@ For EACH card detected:
 
   } catch (error: any) {
     console.error("Error in /api/detect-cards:", error);
-    res.status(500).json(generateFallbackGridDetection(error?.message || "Internal server error"));
+    res.status(200).json(generateFallbackGridDetection(error?.message || "服务器内部错误"));
   }
 });
 
