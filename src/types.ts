@@ -24,4 +24,5 @@ export interface DetectionResult {
   source: 'gemini' | 'fallback';
   rawText?: string;
   message?: string;
+  error?: string;
 }

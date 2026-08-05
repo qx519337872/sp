@@ -67,19 +67,13 @@ app.post("/api/detect-cards", async (req, res) => {
     }
 
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+
     const ai = getGeminiClient();
 
     if (!ai) {
-      res.json(generateFallbackGridDetection("GEMINI_API_KEY is not configured in Vercel Environment Variables"));
+      res.status(400).json({ error: "服务器未配置 GEMINI_API_KEY 环境变量，请配置环境变量后重试" });
       return;
     }
-
-    const imagePart = {
-      inlineData: {
-        data: cleanBase64,
-        mimeType: mimeType,
-      }
-    };
 
     const promptText = `You are an expert Computer Vision model analyzing product cards or price tags in an image.
 Detect ALL distinct product card/tag rectangles (whether there are 1, 3, 6, 12, or 16 cards).
@@ -95,104 +89,108 @@ For EACH card detected:
 
 Return JSON format with a 'cards' array.`;
 
+    const imagePart = {
+      inlineData: {
+        data: cleanBase64,
+        mimeType: mimeType,
+      }
+    };
     const textPart = { text: promptText };
+
+    const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 8000): Promise<T> => {
+      return Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error(`Gemini API request timed out (${timeoutMs}ms)`)), timeoutMs)
+        ),
+      ]);
+    };
 
     const configuredModel = process.env.GEMINI_MODEL?.trim();
     const candidateModels = [
       ...(configuredModel ? [configuredModel] : []),
       "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
-      "gemini-3.6-flash"
+      "gemini-2.5-flash-lite",
+      "gemini-2.0-flash"
     ].filter((v, i, a) => v && a.indexOf(v) === i);
 
-    let response: any = null;
+    let responseText: string | null = null;
     let lastError: any = null;
 
-    // Try with schema first, then without schema if needed
     for (const modelName of candidateModels) {
       try {
-        response = await ai.models.generateContent({
-          model: modelName,
-          contents: [imagePart, textPart],
-          config: {
-            temperature: 0.1,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                cards: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      box_2d: {
-                        type: Type.ARRAY,
-                        items: { type: Type.INTEGER }
-                      },
-                      label: { type: Type.STRING },
-                      amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
-                      date: { type: Type.STRING },
-                      confidence: { type: Type.NUMBER }
-                    },
-                    required: ["box_2d"]
-                  }
-                },
-                summary_date: { type: Type.STRING },
-                total_amount: { type: Type.NUMBER }
-              },
-              required: ["cards"]
-            }
-          }
-        });
-        if (response && response.text) {
-          console.log(`Success using model ${modelName} with schema`);
-          break;
-        }
-      } catch (err: any) {
-        console.warn(`Model '${modelName}' with schema failed:`, err?.message || err);
-        lastError = err;
-
-        // Try without strict schema
-        try {
-          response = await ai.models.generateContent({
+        console.log(`Attempting Gemini detection with model ${modelName}...`);
+        const response = await callWithTimeout(
+          ai.models.generateContent({
             model: modelName,
             contents: [imagePart, textPart],
             config: {
               temperature: 0.1,
               responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  cards: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        box_2d: {
+                          type: Type.ARRAY,
+                          items: { type: Type.INTEGER }
+                        },
+                        label: { type: Type.STRING },
+                        amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
+                        date: { type: Type.STRING },
+                        confidence: { type: Type.NUMBER }
+                      },
+                      required: ["box_2d"]
+                    }
+                  },
+                  summary_date: { type: Type.STRING },
+                  total_amount: { type: Type.NUMBER }
+                },
+                required: ["cards"]
+              }
             }
-          });
-          if (response && response.text) {
-            console.log(`Success using model ${modelName} without schema`);
-            break;
-          }
-        } catch (retryErr: any) {
-          console.warn(`Model '${modelName}' without schema failed:`, retryErr?.message || retryErr);
-          lastError = retryErr;
+          }),
+          8000
+        );
+        if (response && response.text) {
+          console.log(`Success using Gemini model ${modelName}`);
+          responseText = response.text;
+          break;
         }
+      } catch (err: any) {
+        console.warn(`Gemini model '${modelName}' failed:`, err?.message || err);
+        lastError = err;
       }
     }
 
-    if (!response || !response.text) {
-      console.error("All Gemini models failed. Last error:", lastError);
+    if (!responseText) {
+      console.error("Gemini Vision API failed. Last error:", lastError);
       let rawErr = lastError?.message || '';
-      let userFriendlyMsg = `Gemini API 调用异常: ${rawErr || '无法连接 Gemini 服务'}`;
+      let userFriendlyMsg = `Gemini API 调用失败: ${rawErr || 'AI 识别服务未响应'}`;
       if (rawErr.includes('429') || rawErr.includes('RESOURCE_EXHAUSTED') || rawErr.includes('Quota')) {
-        userFriendlyMsg = 'Gemini API 免费层级调用频次超限 (429 Quota Exceeded)。请等待1-2分钟后再试！';
-      } else if (rawErr.includes('API key') || rawErr.includes('401') || rawErr.includes('403') || rawErr.includes('API_KEY_INVALID')) {
-        userFriendlyMsg = 'Gemini API_KEY 无效或受限，请在 Vercel 中检查 GEMINI_API_KEY 配置。';
+        userFriendlyMsg = 'Gemini API 免费层级调用频次受限 (429 Quota Exceeded)，请稍后再试或配置付费 Key';
       }
-      res.status(200).json(generateFallbackGridDetection(userFriendlyMsg));
+      res.status(500).json({ error: userFriendlyMsg });
       return;
     }
 
-    const responseText = response.text || "{}";
+    let cleanedJsonText = responseText.trim();
+    if (cleanedJsonText.startsWith("```json")) {
+      cleanedJsonText = cleanedJsonText.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+    } else if (cleanedJsonText.startsWith("```")) {
+      cleanedJsonText = cleanedJsonText.replace(/^```\s*/, "").replace(/\s*```$/, "");
+    }
+
     let parsed: any = {};
     try {
-      parsed = JSON.parse(responseText);
+      parsed = JSON.parse(cleanedJsonText);
     } catch (parseErr) {
-      res.json(generateFallbackGridDetection("JSON parse error from Gemini output"));
+      console.error("Failed to parse Gemini response as JSON:", responseText);
+      res.status(500).json({ error: "AI 输出的 JSON 数据格式无法正常解析" });
       return;
     }
 
@@ -248,45 +246,8 @@ Return JSON format with a 'cards' array.`;
 
   } catch (error: any) {
     console.error("Error in /api/detect-cards:", error);
-    res.status(200).json(generateFallbackGridDetection(error?.message || "服务器内部错误"));
+    res.status(500).json({ error: error?.message || "服务器内部错误" });
   }
 });
-
-function generateFallbackGridDetection(reason: string) {
-  const cards = [];
-  const rows = 4;
-  const cols = 4;
-  let idx = 1;
-  const dNow = new Date();
-  const todayMD = `${dNow.getMonth() + 1}/${dNow.getDate()}`;
-
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const y0 = Math.round((r / rows) * 1000 + 10);
-      const y1 = Math.round(((r + 1) / rows) * 1000 - 10);
-      const x0 = Math.round((c / cols) * 1000 + 10);
-      const x1 = Math.round(((c + 1) / cols) * 1000 - 10);
-
-      cards.push({
-        id: `fallback-card-${idx}`,
-        cardIndex: idx,
-        box_2d: [y0, x0, y1, x1] as [number, number, number, number],
-        label: `卡片 #${idx}`,
-        amount: '',
-        date: todayMD,
-        confidence: 0.7
-      });
-      idx++;
-    }
-  }
-
-  return {
-    cards,
-    summaryDate: todayMD,
-    totalAmount: 0,
-    source: 'fallback',
-    message: `使用缺省网格 (原因: ${reason})`
-  };
-}
 
 export default app;

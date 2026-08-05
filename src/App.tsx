@@ -63,24 +63,36 @@ export default function App() {
     setIsLoading(true);
     setErrorMsg(null);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     try {
-      // Downscale image payload for high speed recognition (800px max)
       const compressedBase64 = await compressImageForDetection(base64, 800);
 
       const response = await fetch('/api/detect-cards', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           imageBase64: compressedBase64,
           mimeType: 'image/jpeg',
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        throw new Error(`HTTP Error ${response.status}`);
+        const errJson = await response.json().catch(() => null);
+        throw new Error(errJson?.error || `服务器响应异常 (HTTP ${response.status})`);
       }
 
       const result: DetectionResult = await response.json();
+
+      if (result.error) {
+        throw new Error(result.error);
+      }
 
       setCards(result.cards || []);
       if (result.summaryDate) {
@@ -90,29 +102,17 @@ export default function App() {
 
       if (result.cards && result.cards.length > 0) {
         setSelectedCardId(result.cards[0].id);
+        setStep('verify');
+      } else {
+        throw new Error("图片中未检测到清晰的商品卡片，请确认重新拍照或上传");
       }
-
-      setStep('verify');
     } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error('Card detection error:', err);
-      setErrorMsg(err.message || '卡片识别失败，已自动生成缺省网格卡片');
-
-      const todayMD = getTodayMD();
-      const fallbackCards: DetectedCard[] = Array.from({ length: 16 }).map((_, i) => {
-        const row = Math.floor(i / 4);
-        const col = i % 4;
-        return {
-          id: `fallback-${i + 1}`,
-          cardIndex: i + 1,
-          box_2d: [row * 250 + 10, col * 250 + 10, (row + 1) * 250 - 10, (col + 1) * 250 - 10],
-          label: `卡片 #${i + 1}`,
-          amount: '',
-          date: todayMD,
-        };
-      });
-
-      setCards(fallbackCards);
-      setStep('verify');
+      const msg = err?.name === 'AbortError' ? '识别服务响应超时，请检查网络或 API Key' : (err?.message || '识别失败，请稍后重试');
+      setErrorMsg(msg);
+      setCards([]);
+      setStep('upload');
     } finally {
       setIsLoading(false);
     }
@@ -244,19 +244,15 @@ export default function App() {
       {/* Mobile Card Layout Shell */}
       <div className="w-full max-w-[440px] bg-white rounded-[32px] shadow-2xl border border-[#f0e6ea] p-5 sm:p-7 flex flex-col min-h-[580px] relative overflow-hidden">
         
-        {/* App Title Header (Only show on verify/edit/result steps) */}
-        {step !== 'upload' && !isLoading && (
-          <div className="flex items-center justify-between pb-4 border-b border-[#f0e6ea] mb-4">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-2xl bg-[#d6a5b5] text-white flex items-center justify-center shadow-md">
-                <ScanSearch className="w-5 h-5" />
-              </div>
-              <div>
-                <h1 className="font-bold text-base text-[#4a2e3a] tracking-tight">账单识别</h1>
-              </div>
+        {/* Top Header Bar */}
+        <div className="flex items-center justify-between pb-3 border-b border-[#f0e6ea] mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-[#d6a5b5] text-white flex items-center justify-center shadow-sm">
+              <ScanSearch className="w-4 h-4" />
             </div>
+            <h1 className="font-bold text-sm text-[#4a2e3a] tracking-tight">账单识别</h1>
           </div>
-        )}
+        </div>
 
         {/* LOADING INDICATOR */}
         {isLoading && (
@@ -269,6 +265,15 @@ export default function App() {
         {/* STEP 1: HOME / UPLOAD PAGE */}
         {!isLoading && step === 'upload' && (
           <div className="flex-1 flex flex-col justify-center my-auto py-2">
+            {errorMsg && (
+              <div className="mb-4 p-3 bg.red-50 bg-[#fff0f2] border border-[#ffccd3] rounded-2xl flex items-start gap-2.5 text-[#d92d20] text-xs font-medium">
+                <X className="w-4 h-4 shrink-0 mt-0.5 text-[#d92d20] cursor-pointer hover:opacity-80" onClick={() => setErrorMsg(null)} />
+                <div className="flex-1">
+                  <p className="font-bold mb-0.5">调用识别失败</p>
+                  <p className="text-[11px] leading-relaxed opacity-90">{errorMsg}</p>
+                </div>
+              </div>
+            )}
             <ImageUploader onImageSelected={handleImageSelected} isLoading={isLoading} />
           </div>
         )}
