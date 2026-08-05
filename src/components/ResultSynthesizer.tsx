@@ -28,16 +28,155 @@ export const ResultSynthesizer: React.FC<Props> = ({
     let isMounted = true;
     setIsGenerating(true);
 
+    const renderCanvas = (img: HTMLImageElement) => {
+      if (!isMounted) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      canvas.width = img.naturalWidth || 800;
+      canvas.height = img.naturalHeight || 800;
+
+      // Draw original background image
+      ctx.drawImage(img, 0, 0);
+
+      const shortSide = Math.min(canvas.width, canvas.height);
+      const fontSizeBig = Math.round(shortSide * 0.105);
+      const fontSizeMid = Math.round(shortSide * 0.06);
+      const padding = Math.round(shortSide * 0.035);
+
+      // Format text values
+      const totalStr = Number.isInteger(totalAmount)
+        ? String(totalAmount)
+        : totalAmount.toFixed(2);
+
+      let dateMD = summaryDate;
+      if (!dateMD || !dateMD.includes('/')) {
+        const dObj = new Date(summaryDate || Date.now());
+        dateMD = !isNaN(dObj.getTime())
+          ? `${dObj.getMonth() + 1}/${dObj.getDate()}`
+          : `${new Date().getMonth() + 1}/${new Date().getDate()}`;
+      }
+      const countStr = `${itemCount}件`;
+
+      // Authentic Handwritten Fonts (Custom User Font > Google Fonts loaded in index.html):
+      const fontEn = 'MyCustomFont, Kalam, Caveat, "Long Cang", cursive, sans-serif';
+      const fontCn = 'MyCustomFont, "Zhi Mang Xing", "Long Cang", "Ma Shan Zheng", cursive, sans-serif';
+      
+      // Deep blue gel/ballpoint pen ink color matching user sample photo
+      const inkColorPrimary = '#0d43b7';
+      const inkColorSecondary = '#0b399d';
+
+      ctx.save();
+      ctx.font = `700 ${fontSizeBig}px ${fontEn}`;
+      const totalW = ctx.measureText(totalStr).width;
+
+      ctx.font = `700 ${fontSizeMid}px ${fontEn}`;
+      const dateW = ctx.measureText(dateMD).width;
+
+      ctx.font = `700 ${fontSizeMid}px ${fontCn}`;
+      const countW = ctx.measureText(countStr).width;
+      ctx.restore();
+
+      const leftColW = Math.max(dateW, countW);
+      const blockW = leftColW + padding * 0.9 + totalW;
+      const blockH = fontSizeMid * 1.25 + fontSizeMid * 1.25;
+
+      const boxX = canvas.width - padding * 1.2 - blockW;
+      const boxY = canvas.height - padding * 1.2 - blockH;
+
+      // Soft paper-like clean backdrop pad with slight rounded corners
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+      const r = padding * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(boxX - padding * 0.5 + r, boxY - padding * 0.5);
+      ctx.arcTo(boxX + blockW + padding * 0.5, boxY - padding * 0.5, boxX + blockW + padding * 0.5, boxY + blockH + padding * 0.5, r);
+      ctx.arcTo(boxX + blockW + padding * 0.5, boxY + blockH + padding * 0.5, boxX - padding * 0.5, boxY + blockH + padding * 0.5, r);
+      ctx.arcTo(boxX - padding * 0.5, boxY + blockH + padding * 0.5, boxX - padding * 0.5, boxY - padding * 0.5, r);
+      ctx.arcTo(boxX - padding * 0.5, boxY - padding * 0.5, boxX + blockW + padding * 0.5, boxY - padding * 0.5, r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(210, 210, 210, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+
+      // Helper function to draw realistic handwritten strokes
+      const drawHandwrittenText = (
+        text: string,
+        x: number,
+        y: number,
+        fSize: number,
+        fontFamily: string,
+        angleDeg: number
+      ) => {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate((angleDeg * Math.PI) / 180);
+        ctx.font = `700 ${fSize}px ${fontFamily}`;
+        ctx.textBaseline = 'alphabetic';
+        ctx.textAlign = 'left';
+
+        let cursorX = 0;
+        const chars = String(text).split('');
+        for (let i = 0; i < chars.length; i++) {
+          const char = chars[i];
+          const charW = ctx.measureText(char).width;
+
+          ctx.save();
+          const jitterAngle = Math.sin(i * 1.9 + x) * 2.5 * (Math.PI / 180);
+          const jitterY = Math.cos(i * 2.7 + y) * 1.1;
+
+          ctx.translate(cursorX, jitterY);
+          ctx.rotate(jitterAngle);
+
+          // Pass 1: Slightly offset ink bleed background
+          ctx.fillStyle = inkColorSecondary;
+          ctx.globalAlpha = 0.45;
+          ctx.fillText(char, 0.6, 0.6);
+
+          // Pass 2: Main vibrant blue pen ink
+          ctx.fillStyle = inkColorPrimary;
+          ctx.globalAlpha = 0.98;
+          ctx.fillText(char, 0, 0);
+
+          ctx.restore();
+          cursorX += charW;
+        }
+        ctx.restore();
+      };
+
+      // Layout matching photo: Top Date, Bottom Count, Right Big Total
+      const leftX = boxX;
+      const rightX = boxX + leftColW + padding * 0.9;
+
+      drawHandwrittenText(dateMD, leftX, boxY + fontSizeMid * 0.95, fontSizeMid, fontEn, -2);
+      drawHandwrittenText(countStr, leftX, boxY + fontSizeMid * 0.95 + fontSizeMid * 1.25, fontSizeMid, fontCn, -2.5);
+      drawHandwrittenText(totalStr, rightX, boxY + fontSizeBig * 0.9, fontSizeBig, fontEn, -1.5);
+
+      try {
+        const url = canvas.toDataURL('image/jpeg', 0.92);
+        setSynthesizedUrl(url);
+      } catch (err) {
+        console.error('toDataURL error:', err);
+        setSynthesizedUrl(originalImageSrc);
+      }
+      setIsGenerating(false);
+    };
+
     const synthesize = async () => {
-      // Ensure handwritten web fonts (MyCustomFont, Kalam, Zhi Mang Xing, etc.) are fully loaded on both Mobile and PC
+      // 1. Font load check with fast 300ms timeout guard (never hang mobile rendering)
       if (document.fonts) {
         try {
-          await document.fonts.ready;
-          await Promise.allSettled([
-            document.fonts.load('700 36px "MyCustomFont"'),
-            document.fonts.load('700 36px "Kalam"'),
-            document.fonts.load('700 36px "Zhi Mang Xing"'),
-            document.fonts.load('700 36px "Long Cang"'),
+          await Promise.race([
+            Promise.allSettled([
+              document.fonts.load('700 36px "MyCustomFont"'),
+              document.fonts.load('700 36px "Kalam"'),
+              document.fonts.load('700 36px "Zhi Mang Xing"'),
+            ]),
+            new Promise((res) => setTimeout(res, 300)),
           ]);
         } catch (fontErr) {
           console.warn('Font load check warning:', fontErr);
@@ -45,142 +184,36 @@ export const ResultSynthesizer: React.FC<Props> = ({
       }
 
       const img = new Image();
-      img.crossOrigin = 'anonymous';
+      // CRITICAL FOR MOBILE SAFARI: NEVER set crossOrigin for data: URLs
+      if (!originalImageSrc.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+
+      let hasHandled = false;
+      const triggerRender = () => {
+        if (hasHandled) return;
+        hasHandled = true;
+        renderCanvas(img);
+      };
+
+      img.onload = triggerRender;
+      img.onerror = () => {
+        console.warn('Image load failed, falling back to original');
+        if (!hasHandled && isMounted) {
+          hasHandled = true;
+          setSynthesizedUrl(originalImageSrc);
+          setIsGenerating(false);
+        }
+      };
+
       img.src = originalImageSrc;
 
-      img.onload = () => {
-        if (!isMounted) return;
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-
-        // Draw original background image
-        ctx.drawImage(img, 0, 0);
-
-        const shortSide = Math.min(canvas.width, canvas.height);
-        const fontSizeBig = Math.round(shortSide * 0.105);
-        const fontSizeMid = Math.round(shortSide * 0.06);
-        const padding = Math.round(shortSide * 0.035);
-
-        // Format text values
-        const totalStr = Number.isInteger(totalAmount)
-          ? String(totalAmount)
-          : totalAmount.toFixed(2);
-
-        let dateMD = summaryDate;
-        if (!dateMD || !dateMD.includes('/')) {
-          const dObj = new Date(summaryDate || Date.now());
-          dateMD = !isNaN(dObj.getTime())
-            ? `${dObj.getMonth() + 1}/${dObj.getDate()}`
-            : `${new Date().getMonth() + 1}/${new Date().getDate()}`;
+      // Direct fallback timeout if mobile browser stalls img.onload
+      setTimeout(() => {
+        if (!hasHandled && isMounted) {
+          triggerRender();
         }
-        const countStr = `${itemCount}件`;
-
-        // Authentic Handwritten Fonts (Custom User Font > Google Fonts loaded in index.html):
-        // Custom user font placed in /public/fonts/custom-font.ttf is prioritized first!
-        const fontEn = '"MyCustomFont", "Kalam", "Caveat", "Long Cang", cursive';
-        const fontCn = '"MyCustomFont", "Zhi Mang Xing", "Long Cang", "Ma Shan Zheng", cursive';
-        
-        // Deep blue gel/ballpoint pen ink color matching user sample photo
-        const inkColorPrimary = '#0d43b7';
-        const inkColorSecondary = '#0b399d';
-
-        ctx.save();
-        ctx.font = `700 ${fontSizeBig}px ${fontEn}`;
-        const totalW = ctx.measureText(totalStr).width;
-
-        ctx.font = `700 ${fontSizeMid}px ${fontEn}`;
-        const dateW = ctx.measureText(dateMD).width;
-
-        ctx.font = `700 ${fontSizeMid}px ${fontCn}`;
-        const countW = ctx.measureText(countStr).width;
-        ctx.restore();
-
-        const leftColW = Math.max(dateW, countW);
-        const blockW = leftColW + padding * 0.9 + totalW;
-        const blockH = fontSizeMid * 1.25 + fontSizeMid * 1.25;
-
-        const boxX = canvas.width - padding * 1.2 - blockW;
-        const boxY = canvas.height - padding * 1.2 - blockH;
-
-        // Soft paper-like clean backdrop pad with slight rounded corners
-        ctx.save();
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
-        const r = padding * 0.5;
-        ctx.beginPath();
-        ctx.moveTo(boxX - padding * 0.5 + r, boxY - padding * 0.5);
-        ctx.arcTo(boxX + blockW + padding * 0.5, boxY - padding * 0.5, boxX + blockW + padding * 0.5, boxY + blockH + padding * 0.5, r);
-        ctx.arcTo(boxX + blockW + padding * 0.5, boxY + blockH + padding * 0.5, boxX - padding * 0.5, boxY + blockH + padding * 0.5, r);
-        ctx.arcTo(boxX - padding * 0.5, boxY + blockH + padding * 0.5, boxX - padding * 0.5, boxY - padding * 0.5, r);
-        ctx.arcTo(boxX - padding * 0.5, boxY - padding * 0.5, boxX + blockW + padding * 0.5, boxY - padding * 0.5, r);
-        ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(210, 210, 210, 0.6)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.restore();
-
-        // Helper function to draw realistic handwritten strokes with ink pressure & organic micro-jitter
-        const drawHandwrittenText = (
-          text: string,
-          x: number,
-          y: number,
-          fSize: number,
-          fontFamily: string,
-          angleDeg: number
-        ) => {
-          ctx.save();
-          ctx.translate(x, y);
-          ctx.rotate((angleDeg * Math.PI) / 180);
-          ctx.font = `700 ${fSize}px ${fontFamily}`;
-          ctx.textBaseline = 'alphabetic';
-          ctx.textAlign = 'left';
-
-          let cursorX = 0;
-          const chars = String(text).split('');
-          for (let i = 0; i < chars.length; i++) {
-            const char = chars[i];
-            const charW = ctx.measureText(char).width;
-
-            ctx.save();
-            const jitterAngle = Math.sin(i * 1.9 + x) * 2.5 * (Math.PI / 180);
-            const jitterY = Math.cos(i * 2.7 + y) * 1.1;
-
-            ctx.translate(cursorX, jitterY);
-            ctx.rotate(jitterAngle);
-
-            // Pass 1: Slightly offset ink bleed background
-            ctx.fillStyle = inkColorSecondary;
-            ctx.globalAlpha = 0.45;
-            ctx.fillText(char, 0.6, 0.6);
-
-            // Pass 2: Main vibrant blue pen ink
-            ctx.fillStyle = inkColorPrimary;
-            ctx.globalAlpha = 0.98;
-            ctx.fillText(char, 0, 0);
-
-            ctx.restore();
-            cursorX += charW;
-          }
-          ctx.restore();
-        };
-
-        // Layout matching photo: Top Date, Bottom Count, Right Big Total
-        const leftX = boxX;
-        const rightX = boxX + leftColW + padding * 0.9;
-
-        drawHandwrittenText(dateMD, leftX, boxY + fontSizeMid * 0.95, fontSizeMid, fontEn, -2);
-        drawHandwrittenText(countStr, leftX, boxY + fontSizeMid * 0.95 + fontSizeMid * 1.25, fontSizeMid, fontCn, -2.5);
-        drawHandwrittenText(totalStr, rightX, boxY + fontSizeBig * 0.9, fontSizeBig, fontEn, -1.5);
-
-        const url = canvas.toDataURL('image/jpeg', 0.94);
-        setSynthesizedUrl(url);
-        setIsGenerating(false);
-      };
+      }, 1200);
     };
 
     synthesize();
@@ -190,7 +223,7 @@ export const ResultSynthesizer: React.FC<Props> = ({
     };
   }, [originalImageSrc, totalAmount, itemCount, summaryDate]);
 
-  // Directly save / download image without OS multi-option share popup
+  // Directly save / download image
   const handleSaveToGallery = () => {
     if (!synthesizedUrl) return;
 
@@ -202,8 +235,16 @@ export const ResultSynthesizer: React.FC<Props> = ({
     link.click();
     document.body.removeChild(link);
 
+    // On mobile devices (iOS/Android), also show preview modal so user can long-press to save to album directly
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile) {
+      setTimeout(() => {
+        setIsPreviewOpen(true);
+      }, 300);
+    }
+
     setShareSuccess(true);
-    setTimeout(() => setShareSuccess(false), 3000);
+    setTimeout(() => setShareSuccess(false), 4000);
   };
 
   // Standard download link fallback

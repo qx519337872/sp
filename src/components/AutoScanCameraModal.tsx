@@ -95,6 +95,18 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
   };
 
+  const toggleAutoCapture = () => {
+    setAutoCaptureEnabled((prev) => {
+      const next = !prev;
+      if (!next) {
+        stableCounterRef.current = 0;
+        setCountdown(null);
+        isCapturingRef.current = false;
+      }
+      return next;
+    });
+  };
+
   // Analyze video frame clarity and motion stability
   const startAnalyzer = () => {
     const offCanvas = document.createElement('canvas');
@@ -172,11 +184,11 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
           setClarityScore(rawScore);
           setIsStable(isFrameStable);
 
-          // Auto capture logic for elderly users:
-          // If frame is sharp & hand is steady for 4 consecutive checks (~600ms)
+          // Auto capture logic:
+          // If frame is sharp & hand is steady for 6 consecutive checks (~900ms)
           if (autoCaptureEnabled && isHighClarity && isFrameStable) {
             stableCounterRef.current += 1;
-            if (stableCounterRef.current >= 4) {
+            if (stableCounterRef.current >= 6) {
               triggerSnap();
             }
           } else {
@@ -195,8 +207,8 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
     if (isCapturingRef.current || !videoRef.current) return;
     isCapturingRef.current = true;
 
-    // Countdown 3, 2, 1 animation sound/visual effect
-    let count = 2;
+    // Gentle countdown: 3, 2, 1 (850ms per tick for elderly friendliness)
+    let count = 3;
     setCountdown(count);
 
     const timer = setInterval(() => {
@@ -207,7 +219,7 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
       } else {
         setCountdown(count);
       }
-    }, 450);
+    }, 850);
   };
 
   const captureNow = () => {
@@ -233,35 +245,18 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black text-white">
       {/* Top Header Bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-900/90 backdrop-blur border-b border-slate-800 z-10">
-        <div className="flex items-center gap-2">
-          <Camera className="w-5 h-5 text-[#d6a5b5]" />
-          <span className="font-bold text-sm">智能高清对焦扫描</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Flip camera */}
-          <button
-            type="button"
-            onClick={flipCamera}
-            className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all text-xs flex items-center gap-1"
-          >
-            <RefreshCw className="w-4 h-4" />
-            切换镜头
-          </button>
-
-          {/* Close modal */}
-          <button
-            type="button"
-            onClick={() => {
-              stopCamera();
-              onClose();
-            }}
-            className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+      <div className="flex items-center justify-end px-4 py-3 bg-slate-900/90 backdrop-blur border-b border-slate-800 z-10">
+        {/* Close modal */}
+        <button
+          type="button"
+          onClick={() => {
+            stopCamera();
+            onClose();
+          }}
+          className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
       {/* Main Viewport */}
@@ -313,14 +308,21 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
               </div>
             </div>
 
-            {/* Auto-focus Status Bar for Elderly Users */}
+            {/* Auto-focus Status Bar */}
             <div className="absolute top-4 inset-x-4 flex flex-col items-center justify-center z-10 pointer-events-none">
               <div className={`px-4 py-2 rounded-full backdrop-blur-md border text-xs font-bold flex items-center gap-2 shadow-lg transition-all ${
-                clarityScore >= 45 && isStable
+                !autoCaptureEnabled
+                  ? 'bg-slate-900/85 border-slate-700 text-slate-300'
+                  : clarityScore >= 45 && isStable
                   ? 'bg-emerald-950/85 border-emerald-500/60 text-emerald-300'
                   : 'bg-slate-900/85 border-amber-500/50 text-amber-300'
               }`}>
-                {clarityScore >= 45 && isStable ? (
+                {!autoCaptureEnabled ? (
+                  <>
+                    <Zap className="w-4 h-4 text-slate-400" />
+                    <span>手动模式：对准账单后点击中间按钮拍照</span>
+                  </>
+                ) : clarityScore >= 45 && isStable ? (
                   <>
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 animate-bounce" />
                     <span>画面清晰且稳定！准备自动拍照...</span>
@@ -338,36 +340,41 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
       </div>
 
       {/* Bottom Controls Bar */}
-      <div className="p-4 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-3 z-10">
-        {/* Toggle Auto Capture */}
+      <div className="p-4 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-2 z-10">
+        {/* Left: Flip Camera */}
         <button
           type="button"
-          onClick={() => setAutoCaptureEnabled(!autoCaptureEnabled)}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-colors ${
+          onClick={flipCamera}
+          className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all text-xs font-bold text-slate-200 border border-slate-700"
+        >
+          <RefreshCw className="w-4 h-4" />
+          <span>切换镜头</span>
+        </button>
+
+        {/* Center: Big Manual Shutter Button */}
+        <button
+          type="button"
+          onClick={captureNow}
+          disabled={!isCameraReady}
+          className="w-16 h-16 rounded-full border-4 border-white bg-[#d6a5b5] active:scale-90 transition-all flex items-center justify-center shadow-lg disabled:opacity-50 shrink-0"
+          title="手动拍照"
+        >
+          <div className="w-12 h-12 rounded-full bg-white shadow-inner" />
+        </button>
+
+        {/* Right: Toggle Auto Capture */}
+        <button
+          type="button"
+          onClick={toggleAutoCapture}
+          className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold border transition-colors ${
             autoCaptureEnabled
               ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
               : 'bg-slate-800 border-slate-700 text-slate-400'
           }`}
         >
           <Zap className="w-4 h-4" />
-          自动拍摄: {autoCaptureEnabled ? '开启' : '关闭'}
+          <span>自动拍摄: {autoCaptureEnabled ? '开启' : '关闭'}</span>
         </button>
-
-        {/* Big Manual Shutter Button */}
-        <button
-          type="button"
-          onClick={captureNow}
-          disabled={!isCameraReady}
-          className="w-16 h-16 rounded-full border-4 border-white bg-[#d6a5b5] active:scale-90 transition-all flex items-center justify-center shadow-lg disabled:opacity-50"
-          title="手动拍照"
-        >
-          <div className="w-12 h-12 rounded-full bg-white shadow-inner" />
-        </button>
-
-        <div className="w-24 text-right">
-          <span className="text-[11px] text-slate-400 block">适合长辈</span>
-          <span className="text-[10px] text-slate-500 block">自动对焦</span>
-        </div>
       </div>
     </div>
   );
