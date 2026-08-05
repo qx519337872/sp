@@ -17,26 +17,26 @@ const compressImageForDetection = (base64Str: string, maxDim = 1024): Promise<st
     img.crossOrigin = 'anonymous';
     img.src = base64Str;
     img.onload = () => {
-      let width = img.width || 1024;
-      let height = img.height || 1024;
-      if (width > maxDim || height > maxDim) {
-        if (width > height) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
-        }
+      let width = img.width;
+      let height = img.height;
+      if (width <= maxDim && height <= maxDim) {
+        resolve(base64Str);
+        return;
+      }
+      if (width > height) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      } else {
+        width = Math.round((width * maxDim) / height);
+        height = maxDim;
       }
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.80));
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
       } else {
         resolve(base64Str);
       }

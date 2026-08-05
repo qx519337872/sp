@@ -39,35 +39,18 @@ app.post("/api/detect-cards", async (req, res) => {
       return;
     }
 
-    let userModel = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim().replace(/^["']|["']$/g, '');
-    if (userModel.includes("3.6")) {
-      userModel = "gemini-2.5-flash";
-    }
-
-    const candidateModels = [
-      userModel,
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
-    ].filter(Boolean).filter((m, idx, arr) => arr.indexOf(m) === idx);
-
-    let response: any = null;
-    let lastError: any = null;
-
-    for (const modelName of candidateModels) {
-      try {
-        response = await ai.models.generateContent({
-          model: modelName,
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  data: cleanBase64,
-                  mimeType: mimeType,
-                },
-              },
-              {
-                text: `You are an expert Computer Vision model analyzing product cards or price tags in an image.
+    const response = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              data: cleanBase64,
+              mimeType: mimeType,
+            },
+          },
+          {
+            text: `You are an expert Computer Vision model analyzing product cards or price tags in an image.
 Detect ALL distinct product card/tag rectangles (whether there are 1, 3, 6, 12, or 16 cards).
 
 For EACH card detected:
@@ -78,53 +61,39 @@ For EACH card detected:
    - If price is a single number like '560', '220', return 560 or 220.
    - If gift/freebie (0 price), return 0.
 4. Extract date on the card in M/D format (e.g. '7/30', '7/31').`,
-              },
-            ],
           },
-          config: {
-            temperature: 0.1,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                cards: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      box_2d: {
-                        type: Type.ARRAY,
-                        items: { type: Type.INTEGER }
-                      },
-                      label: { type: Type.STRING },
-                      amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
-                      date: { type: Type.STRING },
-                      confidence: { type: Type.NUMBER }
-                    },
-                    required: ["box_2d"]
-                  }
+        ],
+      },
+      config: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            cards: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  box_2d: {
+                    type: Type.ARRAY,
+                    items: { type: Type.INTEGER }
+                  },
+                  label: { type: Type.STRING },
+                  amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
+                  date: { type: Type.STRING },
+                  confidence: { type: Type.NUMBER }
                 },
-                summary_date: { type: Type.STRING },
-                total_amount: { type: Type.NUMBER }
-              },
-              required: ["cards"]
-            }
-          }
-        });
-        if (response && response.text) {
-          break; // Successfully got response
+                required: ["box_2d"]
+              }
+            },
+            summary_date: { type: Type.STRING },
+            total_amount: { type: Type.NUMBER }
+          },
+          required: ["cards"]
         }
-      } catch (err: any) {
-        console.warn(`Model '${modelName}' failed:`, err?.message || err);
-        lastError = err;
       }
-    }
-
-    if (!response || !response.text) {
-      console.error("All Gemini models failed. Last error:", lastError);
-      res.status(200).json(generateFallbackGridDetection(`Gemini API 异常: ${lastError?.message || '模型调用失败，请检查 GEMINI_API_KEY 配置'}`));
-      return;
-    }
+    });
 
     const responseText = response.text || "{}";
     let parsed: any = {};
@@ -197,7 +166,7 @@ For EACH card detected:
 
   } catch (error: any) {
     console.error("Error in /api/detect-cards:", error);
-    res.status(200).json(generateFallbackGridDetection(error?.message || "服务器内部错误"));
+    res.status(500).json(generateFallbackGridDetection(error?.message || "Internal server error"));
   }
 });
 
