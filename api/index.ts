@@ -21,6 +21,41 @@ function getGeminiClient() {
   });
 }
 
+// Utility helper to evaluate amount expressions and equations safely
+function parseAndEvaluateAmount(amountInput: any): number | string {
+  if (amountInput === undefined || amountInput === null || amountInput === '') return '';
+  const rawStr = String(amountInput).trim();
+  if (!rawStr) return '';
+
+  // 1. If contains equals sign like "3+2=5" or "10*2=20" or "A+B = 120", extract number after '='
+  if (rawStr.includes('=')) {
+    const parts = rawStr.split('=');
+    const rightPart = parts[parts.length - 1].trim();
+    const rightNum = parseFloat(rightPart.replace(/[^\d.]/g, ''));
+    if (!isNaN(rightNum)) {
+      return rightNum;
+    }
+  }
+
+  // 2. If expression without equals like "3+2", "3*2", "3x2", "3×2", calculate multiplication (3 * 2 = 6)
+  const exprMatch = rawStr.match(/^(\d+(?:\.\d+)?)\s*[\+\*xX×]\s*(\d+(?:\.\d+)?)$/);
+  if (exprMatch) {
+    const num1 = parseFloat(exprMatch[1]);
+    const num2 = parseFloat(exprMatch[2]);
+    if (!isNaN(num1) && !isNaN(num2)) {
+      return num1 * num2;
+    }
+  }
+
+  // 3. Single number or currency string like "¥560" or "560"
+  const parsedFloat = parseFloat(rawStr.replace(/[^\d.]/g, ''));
+  if (!isNaN(parsedFloat)) {
+    return parsedFloat;
+  }
+
+  return rawStr;
+}
+
 // API Route for product card detection
 app.post("/api/detect-cards", async (req, res) => {
   try {
@@ -39,61 +74,109 @@ app.post("/api/detect-cards", async (req, res) => {
       return;
     }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              data: cleanBase64,
-              mimeType: mimeType,
-            },
-          },
-          {
-            text: `You are an expert Computer Vision model analyzing product cards or price tags in an image.
+    const imagePart = {
+      inlineData: {
+        data: cleanBase64,
+        mimeType: mimeType,
+      }
+    };
+
+    const promptText = `You are an expert Computer Vision model analyzing product cards or price tags in an image.
 Detect ALL distinct product card/tag rectangles (whether there are 1, 3, 6, 12, or 16 cards).
 
 For EACH card detected:
 1. Provide its 2D bounding box [ymin, xmin, ymax, xmax] normalized on 0..1000 scale.
-2. Extract the card label or tag code (e.g. 'A654').
+2. Extract the card label or tag code (e.g. 'A654', 'かおり').
 3. Extract the price or amount:
    - If price shows an expression like '3+2', '3*2', or '3x2', calculate MULTIPLICATION (3 * 2 = 6). Return 6.
-   - If price is a single number like '560', '220', return 560 or 220.
+   - If price is a single number like '560', '220', '440', return 560, 220, 440.
    - If gift/freebie (0 price), return 0.
-4. Extract date on the card in M/D format (e.g. '7/30', '7/31').`,
-          },
-        ],
-      },
-      config: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            cards: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  box_2d: {
-                    type: Type.ARRAY,
-                    items: { type: Type.INTEGER }
-                  },
-                  label: { type: Type.STRING },
-                  amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
-                  date: { type: Type.STRING },
-                  confidence: { type: Type.NUMBER }
+4. Extract date on the card in M/D format (e.g. '7/30', '7/31').
+
+Return JSON format with a 'cards' array.`;
+
+    const textPart = { text: promptText };
+
+    const candidateModels = [
+      "gemini-2.5-flash",
+      "gemini-3.6-flash",
+      "gemini-2.5-flash",
+      "gemini-flash-latest"
+    ];
+
+    let response: any = null;
+    let lastError: any = null;
+
+    // Try with schema first, then without schema if needed
+    for (const modelName of candidateModels) {
+      try {
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents: [imagePart, textPart],
+          config: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                cards: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      box_2d: {
+                        type: Type.ARRAY,
+                        items: { type: Type.INTEGER }
+                      },
+                      label: { type: Type.STRING },
+                      amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
+                      date: { type: Type.STRING },
+                      confidence: { type: Type.NUMBER }
+                    },
+                    required: ["box_2d"]
+                  }
                 },
-                required: ["box_2d"]
-              }
-            },
-            summary_date: { type: Type.STRING },
-            total_amount: { type: Type.NUMBER }
-          },
-          required: ["cards"]
+                summary_date: { type: Type.STRING },
+                total_amount: { type: Type.NUMBER }
+              },
+              required: ["cards"]
+            }
+          }
+        });
+        if (response && response.text) {
+          console.log(`Success using model ${modelName} with schema`);
+          break;
+        }
+      } catch (err: any) {
+        console.warn(`Model '${modelName}' with schema failed:`, err?.message || err);
+        lastError = err;
+
+        // Try without strict schema
+        try {
+          response = await ai.models.generateContent({
+            model: modelName,
+            contents: [imagePart, textPart],
+            config: {
+              temperature: 0.1,
+              responseMimeType: "application/json",
+            }
+          });
+          if (response && response.text) {
+            console.log(`Success using model ${modelName} without schema`);
+            break;
+          }
+        } catch (retryErr: any) {
+          console.warn(`Model '${modelName}' without schema failed:`, retryErr?.message || retryErr);
+          lastError = retryErr;
         }
       }
-    });
+    }
+
+    if (!response || !response.text) {
+      console.error("All Gemini models failed. Last error:", lastError);
+      res.status(200).json(generateFallbackGridDetection(`Gemini API 异常: ${lastError?.message || '模型调用失败，请检查 GEMINI_API_KEY 配置'}`));
+      return;
+    }
 
     const responseText = response.text || "{}";
     let parsed: any = {};
@@ -117,18 +200,8 @@ For EACH card detected:
         ];
       }
 
-      // Evaluate amount expression if string like "3+2" or "3x2"
-      let valNum: number | string = '';
-      if (c.amount !== undefined && c.amount !== null) {
-        const rawStr = String(c.amount).trim();
-        const exprMatch = rawStr.match(/^(\d+)\s*[\+\*xX×]\s*(\d+)$/);
-        if (exprMatch) {
-          valNum = parseInt(exprMatch[1], 10) * parseInt(exprMatch[2], 10);
-        } else {
-          const parsedFloat = parseFloat(rawStr.replace(/[^\d.]/g, ''));
-          valNum = !isNaN(parsedFloat) ? parsedFloat : rawStr;
-        }
-      }
+      // Evaluate amount expression if string like "3+2", "3x2", or equation like "3+2=5"
+      const valNum = parseAndEvaluateAmount(c.amount);
 
       return {
         id: `card-${index + 1}-${Date.now()}`,
@@ -166,7 +239,7 @@ For EACH card detected:
 
   } catch (error: any) {
     console.error("Error in /api/detect-cards:", error);
-    res.status(500).json(generateFallbackGridDetection(error?.message || "Internal server error"));
+    res.status(200).json(generateFallbackGridDetection(error?.message || "服务器内部错误"));
   }
 });
 

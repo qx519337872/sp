@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Download, RefreshCw, CheckCircle2, Share2 } from 'lucide-react';
+import { Download, RefreshCw, CheckCircle2, Share2, Image as ImageIcon, Sparkles, Smartphone, Eye } from 'lucide-react';
 
 interface Props {
   originalImageSrc: string;
@@ -19,6 +19,8 @@ export const ResultSynthesizer: React.FC<Props> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [synthesizedUrl, setSynthesizedUrl] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(true);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [shareSuccess, setShareSuccess] = useState(false);
 
   useEffect(() => {
     if (!originalImageSrc) return;
@@ -41,8 +43,8 @@ export const ResultSynthesizer: React.FC<Props> = ({
       ctx.drawImage(img, 0, 0);
 
       const shortSide = Math.min(canvas.width, canvas.height);
-      const fontSizeBig = Math.round(shortSide * 0.09);
-      const fontSizeMid = Math.round(shortSide * 0.055);
+      const fontSizeBig = Math.round(shortSide * 0.105);
+      const fontSizeMid = Math.round(shortSide * 0.06);
       const padding = Math.round(shortSide * 0.035);
 
       // Format text values
@@ -59,10 +61,14 @@ export const ResultSynthesizer: React.FC<Props> = ({
       }
       const countStr = `${itemCount}件`;
 
-      // Fonts: Kalam / Caveat for English numbers/slashes, Ma Shan Zheng for Chinese '件'
-      const fontEn = '"Kalam", "Caveat", "Comic Sans MS", cursive';
-      const fontCn = '"Ma Shan Zheng", "Kalam", cursive';
-      const inkColor = '#1042a8'; // Deep ballpoint blue pen ink
+      // Authentic Handwritten Fonts (Custom User Font > Google Fonts loaded in index.html):
+      // Custom user font placed in /public/fonts/custom-font.ttf is prioritized first!
+      const fontEn = '"MyCustomFont", "Kalam", "Caveat", "Long Cang", cursive';
+      const fontCn = '"MyCustomFont", "Zhi Mang Xing", "Long Cang", "Ma Shan Zheng", cursive';
+      
+      // Deep blue gel/ballpoint pen ink color matching user sample photo
+      const inkColorPrimary = '#0d43b7';
+      const inkColorSecondary = '#0b399d';
 
       ctx.save();
       ctx.font = `700 ${fontSizeBig}px ${fontEn}`;
@@ -76,30 +82,30 @@ export const ResultSynthesizer: React.FC<Props> = ({
       ctx.restore();
 
       const leftColW = Math.max(dateW, countW);
-      const blockW = leftColW + padding * 0.8 + totalW;
-      const blockH = fontSizeMid * 1.2 + fontSizeMid * 1.2;
+      const blockW = leftColW + padding * 0.9 + totalW;
+      const blockH = fontSizeMid * 1.25 + fontSizeMid * 1.25;
 
       const boxX = canvas.width - padding * 1.2 - blockW;
       const boxY = canvas.height - padding * 1.2 - blockH;
 
-      // Soft paper-like clean backdrop pad
+      // Soft paper-like clean backdrop pad with slight rounded corners
       ctx.save();
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
       const r = padding * 0.5;
       ctx.beginPath();
-      ctx.moveTo(boxX - padding * 0.4 + r, boxY - padding * 0.4);
-      ctx.arcTo(boxX + blockW + padding * 0.4, boxY - padding * 0.4, boxX + blockW + padding * 0.4, boxY + blockH + padding * 0.4, r);
-      ctx.arcTo(boxX + blockW + padding * 0.4, boxY + blockH + padding * 0.4, boxX - padding * 0.4, boxY + blockH + padding * 0.4, r);
-      ctx.arcTo(boxX - padding * 0.4, boxY + blockH + padding * 0.4, boxX - padding * 0.4, boxY - padding * 0.4, r);
-      ctx.arcTo(boxX - padding * 0.4, boxY - padding * 0.4, boxX + blockW + padding * 0.4, boxY - padding * 0.4, r);
+      ctx.moveTo(boxX - padding * 0.5 + r, boxY - padding * 0.5);
+      ctx.arcTo(boxX + blockW + padding * 0.5, boxY - padding * 0.5, boxX + blockW + padding * 0.5, boxY + blockH + padding * 0.5, r);
+      ctx.arcTo(boxX + blockW + padding * 0.5, boxY + blockH + padding * 0.5, boxX - padding * 0.5, boxY + blockH + padding * 0.5, r);
+      ctx.arcTo(boxX - padding * 0.5, boxY + blockH + padding * 0.5, boxX - padding * 0.5, boxY - padding * 0.5, r);
+      ctx.arcTo(boxX - padding * 0.5, boxY - padding * 0.5, boxX + blockW + padding * 0.5, boxY - padding * 0.5, r);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = 'rgba(210, 210, 210, 0.5)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(210, 210, 210, 0.6)';
+      ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.restore();
 
-      // Helper function to draw handwritten text character by character with micro-rotations
+      // Helper function to draw realistic handwritten strokes with ink pressure & organic micro-jitter
       const drawHandwrittenText = (
         text: string,
         x: number,
@@ -112,51 +118,97 @@ export const ResultSynthesizer: React.FC<Props> = ({
         ctx.translate(x, y);
         ctx.rotate((angleDeg * Math.PI) / 180);
         ctx.font = `700 ${fSize}px ${fontFamily}`;
-        ctx.fillStyle = inkColor;
         ctx.textBaseline = 'alphabetic';
         ctx.textAlign = 'left';
 
         let cursorX = 0;
         const chars = String(text).split('');
         for (let i = 0; i < chars.length; i++) {
+          const char = chars[i];
+          const charW = ctx.measureText(char).width;
+
+          // Double pass drawing to simulate felt-tip blue ink pen stroke weight and subtle ink bleeds
           ctx.save();
-          const jitterAngle = (Math.sin(i * 1.7) * 2) * (Math.PI / 180);
-          ctx.translate(cursorX, Math.cos(i * 2.3) * 0.8);
+          const jitterAngle = Math.sin(i * 1.9 + x) * 2.5 * (Math.PI / 180);
+          const jitterY = Math.cos(i * 2.7 + y) * 1.1;
+
+          ctx.translate(cursorX, jitterY);
           ctx.rotate(jitterAngle);
-          ctx.fillText(chars[i], 0, 0);
+
+          // Pass 1: Slightly offset ink bleed background
+          ctx.fillStyle = inkColorSecondary;
+          ctx.globalAlpha = 0.45;
+          ctx.fillText(char, 0.6, 0.6);
+
+          // Pass 2: Main vibrant blue pen ink
+          ctx.fillStyle = inkColorPrimary;
+          ctx.globalAlpha = 0.98;
+          ctx.fillText(char, 0, 0);
+
           ctx.restore();
-          cursorX += ctx.measureText(chars[i]).width;
+          cursorX += charW;
         }
         ctx.restore();
       };
 
-      // Layout exactly like sample image:
-      // Left Column Top: Date (7/30)
-      // Left Column Bottom: Item Count (3件)
-      // Right Side Large: Total Amount (220)
+      // Layout exactly matching user's photo:
+      // Left Top: Date (e.g. 7/30)
+      // Left Bottom: Count (e.g. 3件)
+      // Right Large: Total Amount (e.g. 220)
       const leftX = boxX;
-      const rightX = boxX + leftColW + padding * 0.8;
+      const rightX = boxX + leftColW + padding * 0.9;
 
       // Top Date: 7/30
-      drawHandwrittenText(dateMD, leftX, boxY + fontSizeMid * 0.9, fontSizeMid, fontEn, -2);
+      drawHandwrittenText(dateMD, leftX, boxY + fontSizeMid * 0.95, fontSizeMid, fontEn, -2);
 
       // Bottom Count: 3件
-      drawHandwrittenText(countStr, leftX, boxY + fontSizeMid * 0.9 + fontSizeMid * 1.15, fontSizeMid, fontCn, -3);
+      drawHandwrittenText(countStr, leftX, boxY + fontSizeMid * 0.95 + fontSizeMid * 1.25, fontSizeMid, fontCn, -2.5);
 
       // Right Big Total Amount: 220
       drawHandwrittenText(totalStr, rightX, boxY + fontSizeBig * 0.9, fontSizeBig, fontEn, -1.5);
 
-      const url = canvas.toDataURL('image/jpeg', 0.92);
+      const url = canvas.toDataURL('image/jpeg', 0.94);
       setSynthesizedUrl(url);
       setIsGenerating(false);
     };
   }, [originalImageSrc, totalAmount, itemCount, summaryDate]);
 
-  const handleDownload = () => {
+  // Save directly to mobile photo gallery via Web Share API
+  const handleSaveToGallery = async () => {
+    if (!synthesizedUrl) return;
+
+    try {
+      // Convert Data URL to Blob -> File
+      const res = await fetch(synthesizedUrl);
+      const blob = await res.blob();
+      const fileName = `账单汇总_${summaryDate.replace('/', '_') || 'today'}.jpg`;
+      const file = new File([blob], fileName, { type: 'image/jpeg' });
+
+      // Check if Web Share API supports file sharing (iOS Safari & Android Chrome)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: '商品卡片账单汇总',
+          text: `账单汇总：${summaryDate} 共${itemCount}件，合计￥${totalAmount}`,
+        });
+        setShareSuccess(true);
+        setTimeout(() => setShareSuccess(false), 3000);
+        return;
+      }
+    } catch (err) {
+      console.warn('Web Share failed or cancelled:', err);
+    }
+
+    // Fallback: Open preview modal so user can long-press to save directly to Photos album
+    setIsPreviewOpen(true);
+  };
+
+  // Standard download link fallback
+  const handleDownloadFile = () => {
     if (!synthesizedUrl) return;
     const link = document.createElement('a');
     link.href = synthesizedUrl;
-    link.download = `商品卡片账单汇总_${summaryDate || 'today'}.jpg`;
+    link.download = `商品卡片账单汇总_${summaryDate.replace('/', '_') || 'today'}.jpg`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -171,12 +223,15 @@ export const ResultSynthesizer: React.FC<Props> = ({
         合成完成！
       </div>
 
-      {/* Result Preview */}
-      <div className="relative w-full rounded-2xl overflow-hidden border border-[#ece2e6] bg-[#222222] shadow-inner min-h-[260px] flex items-center justify-center mb-4">
+      {/* Result Preview Box */}
+      <div
+        onClick={() => setIsPreviewOpen(true)}
+        className="relative w-full rounded-2xl overflow-hidden border border-[#ece2e6] bg-[#222222] shadow-inner min-h-[260px] flex items-center justify-center mb-4 cursor-pointer group"
+      >
         {isGenerating ? (
           <div className="flex flex-col items-center gap-3 text-white/80 py-12">
             <div className="w-8 h-8 border-4 border-[#d6a5b5] border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs">正在渲染手写汇总图...</span>
+            <span className="text-xs">正在渲染蓝墨水手写汇总图...</span>
           </div>
         ) : (
           <img
@@ -187,27 +242,68 @@ export const ResultSynthesizer: React.FC<Props> = ({
         )}
       </div>
 
-      {/* Actions */}
-      <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full">
+      {/* Two Action Buttons: Left = 重新选图, Right = 保存至手机相册 */}
+      <div className="flex items-center gap-3 w-full">
         <button
           type="button"
-          onClick={handleDownload}
-          disabled={isGenerating || !synthesizedUrl}
-          className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-full bg-[#d6a5b5] hover:bg-[#c492a2] text-white font-bold text-xs shadow-md shadow-[#d6a5b5]/30 transition-all disabled:opacity-50"
+          onClick={onRestart}
+          className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-full bg-[#f7f2f4] hover:bg-[#ece2e6] active:scale-95 text-[#4a2e3a] font-bold text-sm transition-all"
         >
-          <Download className="w-4 h-4" />
-          保存合成图片
+          <RefreshCw className="w-4 h-4 text-[#a88892]" />
+          重新选图
         </button>
 
         <button
           type="button"
-          onClick={onRestart}
-          className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-full bg-[#f7f2f4] hover:bg-[#ece2e6] text-[#a88892] font-bold text-xs transition-all"
+          onClick={handleSaveToGallery}
+          disabled={isGenerating || !synthesizedUrl}
+          className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-full bg-[#d6a5b5] hover:bg-[#c492a2] active:scale-95 text-white font-bold text-sm shadow-md shadow-[#d6a5b5]/30 transition-all disabled:opacity-50"
         >
-          <RefreshCw className="w-4 h-4" />
-          重新选图
+          <Share2 className="w-4.5 h-4.5" />
+          保存至手机相册
         </button>
       </div>
+
+      {/* Full-screen Preview Modal for Long-Press Save */}
+      {isPreviewOpen && (
+        <div
+          onClick={() => setIsPreviewOpen(false)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-between p-4"
+        >
+          <div className="w-full flex justify-between items-center text-white text-xs pt-2 px-2">
+            <span className="font-bold flex items-center gap-1.5 text-emerald-400">
+              <Sparkles className="w-4 h-4" />
+              长按下方图片选择【保存到相册】
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsPreviewOpen(false)}
+              className="py-1 px-3 rounded-full bg-white/20 text-white font-bold"
+            >
+              关闭
+            </button>
+          </div>
+
+          <div className="flex-1 flex items-center justify-center w-full my-auto overflow-auto">
+            <img
+              src={synthesizedUrl}
+              alt="手写账单图片"
+              className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl select-all"
+            />
+          </div>
+
+          <div className="w-full max-w-sm pb-4 text-center">
+            <button
+              type="button"
+              onClick={handleDownloadFile}
+              className="w-full py-3 rounded-full bg-[#d6a5b5] text-white font-bold text-xs shadow-lg"
+            >
+              直接下载图片文件
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

@@ -11,32 +11,32 @@ const getTodayMD = () => {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 };
 
-const compressImageForDetection = (base64Str: string, maxDim = 1024): Promise<string> => {
+const compressImageForDetection = (base64Str: string, maxDim = 800): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.src = base64Str;
     img.onload = () => {
-      let width = img.width;
-      let height = img.height;
-      if (width <= maxDim && height <= maxDim) {
-        resolve(base64Str);
-        return;
-      }
-      if (width > height) {
-        height = Math.round((height * maxDim) / width);
-        width = maxDim;
-      } else {
-        width = Math.round((width * maxDim) / height);
-        height = maxDim;
+      let width = img.width || 800;
+      let height = img.height || 800;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
       }
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
+        resolve(canvas.toDataURL('image/jpeg', 0.70));
       } else {
         resolve(base64Str);
       }
@@ -64,8 +64,8 @@ export default function App() {
     setErrorMsg(null);
 
     try {
-      // Downscale image payload for high speed recognition
-      const compressedBase64 = await compressImageForDetection(base64, 1024);
+      // Downscale image payload for high speed recognition (800px max)
+      const compressedBase64 = await compressImageForDetection(base64, 800);
 
       const response = await fetch('/api/detect-cards', {
         method: 'POST',
@@ -120,8 +120,30 @@ export default function App() {
 
   // Card list mutations
   const handleUpdateCard = (id: string, field: keyof DetectedCard, value: any) => {
+    let valToSave = value;
+    if (field === 'amount' && typeof value === 'string') {
+      const rawStr = value.trim();
+      if (rawStr.includes('=')) {
+        const parts = rawStr.split('=');
+        const rightPart = parts[parts.length - 1].trim();
+        const rightNum = parseFloat(rightPart.replace(/[^\d.]/g, ''));
+        if (!isNaN(rightNum)) {
+          valToSave = rightNum;
+        }
+      } else {
+        const exprMatch = rawStr.match(/^(\d+(?:\.\d+)?)\s*[\+\*xX×]\s*(\d+(?:\.\d+)?)$/);
+        if (exprMatch) {
+          const n1 = parseFloat(exprMatch[1]);
+          const n2 = parseFloat(exprMatch[2]);
+          if (!isNaN(n1) && !isNaN(n2)) {
+            valToSave = n1 * n2;
+          }
+        }
+      }
+    }
+
     setCards((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, [field]: value } : c))
+      prev.map((c) => (c.id === id ? { ...c, [field]: valToSave } : c))
     );
   };
 
@@ -233,15 +255,6 @@ export default function App() {
                 <h1 className="font-bold text-base text-[#4a2e3a] tracking-tight">账单识别</h1>
               </div>
             </div>
-
-            <button
-              type="button"
-              onClick={handleRestart}
-              className="px-3 py-1.5 rounded-full bg-[#faf5f7] hover:bg-[#f0e6ea] text-[#a88892] text-xs font-medium transition-colors flex items-center gap-1"
-            >
-              <RefreshCcw className="w-3.5 h-3.5" />
-              重新选图
-            </button>
           </div>
         )}
 
