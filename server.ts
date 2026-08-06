@@ -37,91 +37,95 @@ function getGeminiClients(): { client: GoogleGenAI; keyId: string }[] {
   }));
 }
 
-async function callRelayAPI(cleanBase64: string, mimeType: string, promptText: string): Promise<string | null> {
-  const apiKey = (
-    process.env.RELAY_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    process.env.SILICONFLOW_API_KEY ||
-    "sk-tm-VcBvkr26j2npOfzdYy2HvB8RGdJ5iBXTB2l2I9M3LGX10G9o"
-  )?.trim();
+function repairTruncatedJson(jsonStr: string): string {
+  let str = jsonStr.trim();
+  let inString = false;
+  let escapeNext = false;
+  const stack: string[] = [];
 
-  if (!apiKey) return null;
-
-  let baseUrl = (
-    process.env.RELAY_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    process.env.OPENAI_API_BASE ||
-    "https://api.tokenmix.ai/v1"
-  ).trim();
-
-  // Clean baseUrl: remove /chat/completions suffix if user provided full endpoint
-  baseUrl = baseUrl.replace(/\/chat\/completions\/?$/, '');
-  baseUrl = baseUrl.replace(/\/+$/, '');
-  if (!baseUrl.endsWith('/v1')) {
-    baseUrl += '/v1';
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+    if (char === '\\') {
+      escapeNext = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (char === '{' || char === '[') {
+        stack.push(char === '{' ? '}' : ']');
+      } else if (char === '}' || char === ']') {
+        if (stack.length > 0 && stack[stack.length - 1] === char) {
+          stack.pop();
+        }
+      }
+    }
   }
 
-  const model = (
-    process.env.RELAY_MODEL ||
-    process.env.OPENAI_MODEL ||
-    "gemini-2.5-flash"
-  ).trim();
+  if (inString) {
+    str += '"';
+  }
 
-  console.log(`Attempting Relay API call (${baseUrl}) with model '${model}'...`);
+  str = str.replace(/,\s*$/, '');
+  str = str.replace(/:\s*$/, ': null');
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 40000);
+  while (stack.length > 0) {
+    const expected = stack.pop();
+    str += expected;
+  }
+
+  return str;
+}
+
+function extractAndParseJson(responseText: string): any {
+  if (!responseText || typeof responseText !== 'string') {
+    throw new Error('Response text is empty');
+  }
+
+  let s = responseText.trim();
+  // Remove <think>...</think> tags if present
+  s = s.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+  // Match markdown code block ```json ... ```
+  const jsonBlockMatch = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (jsonBlockMatch && jsonBlockMatch[1]) {
+    s = jsonBlockMatch[1].trim();
+  } else {
+    // Or find outermost { ... }
+    const firstBrace = s.indexOf("{");
+    const lastBrace = s.lastIndexOf("}");
+    if (firstBrace !== -1) {
+      if (lastBrace > firstBrace) {
+        s = s.substring(firstBrace, lastBrace + 1);
+      } else {
+        s = s.substring(firstBrace);
+      }
+    }
+  }
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:${mimeType};base64,${cleanBase64}`
-                }
-              },
-              {
-                type: "text",
-                text: promptText + "\nIMPORTANT: Return ONLY a JSON object containing a 'cards' array."
-              }
-            ]
-          }
-        ],
-        response_format: { type: "json_object" },
-        thinking_budget: 0,
-        temperature: 0.1,
-        max_tokens: 2048
-      })
-    });
-
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      const json = await response.json();
-      return json?.choices?.[0]?.message?.content || null;
-    } else {
-      const errText = await response.text();
-      console.warn(`Relay API returned HTTP ${response.status}:`, errText);
-      throw new Error(`[HTTP ${response.status}]: ${errText}`);
+    return JSON.parse(s);
+  } catch (err1) {
+    // Try stripping trailing commas if parse fails
+    const cleaned = s.replace(/,\s*([}\]])/g, '$1');
+    try {
+      return JSON.parse(cleaned);
+    } catch (err2) {
+      // Try repairing truncated JSON
+      const repaired = repairTruncatedJson(cleaned);
+      try {
+        return JSON.parse(repaired);
+      } catch (err3) {
+        console.error("Failed to parse JSON string. Raw response:", responseText);
+        throw new Error("Unable to parse JSON");
+      }
     }
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      throw new Error(`[超时]: TokenMix / 中转 API 响应超过 9 秒`);
-    }
-    throw err;
   }
 }
 
@@ -170,20 +174,13 @@ app.post("/api/detect-cards", async (req, res) => {
       return;
     }
 
-    // Strip data URI header if present
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
     const geminiClients = getGeminiClients();
-    const hasRelayKey = !!(
-      process.env.RELAY_API_KEY ||
-      process.env.OPENAI_API_KEY ||
-      process.env.SILICONFLOW_API_KEY ||
-      "sk-tm-VcBvkr26j2npOfzdYy2HvB8RGdJ5iBXTB2l2I9M3LGX10G9o"
-    );
 
-    if (geminiClients.length === 0 && !hasRelayKey) {
-      console.warn("Neither GEMINI_API_KEY nor RELAY_API_KEY is set.");
-      res.status(400).json({ error: "服务器未配置 GEMINI_API_KEY 或 RELAY_API_KEY 环境变量" });
+    if (geminiClients.length === 0) {
+      console.warn("GEMINI_API_KEY is not set.");
+      res.status(400).json({ error: "服务器未配置 GEMINI_API_KEY 环境变量，请在 Vercel 设置 -> Environment Variables 中添加 GEMINI_API_KEY" });
       return;
     }
 
@@ -203,100 +200,85 @@ Return JSON format with a 'cards' array.`;
 
     let responseText: string | null = null;
     let lastError: any = null;
-    let relayErrorMsg: string | null = null;
 
-    // 1. Try Relay API (OpenAI compatible) first if configured
-    if (hasRelayKey) {
-      try {
-        responseText = await callRelayAPI(cleanBase64, mimeType, promptText);
-      } catch (relayErr: any) {
-        relayErrorMsg = relayErr?.message || String(relayErr);
-        console.warn("Relay API call failed, falling back to Gemini SDK if available:", relayErrorMsg);
-        lastError = relayErr;
+    const imagePart = {
+      inlineData: {
+        data: cleanBase64,
+        mimeType: mimeType,
       }
-    }
+    };
+    const textPart = { text: promptText };
 
-    // 2. Try Gemini SDK if no response yet
-    if (!responseText && geminiClients.length > 0) {
-      const imagePart = {
-        inlineData: {
-          data: cleanBase64,
-          mimeType: mimeType,
-        }
-      };
-      const textPart = { text: promptText };
+    const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 35000): Promise<T> => {
+      return Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error(`Gemini API 响应超时 (${timeoutMs}ms)`)), timeoutMs)
+        ),
+      ]);
+    };
 
-      const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 35000): Promise<T> => {
-        return Promise.race([
-          promise,
-          new Promise<T>((_, reject) =>
-            setTimeout(() => reject(new Error(`Gemini API request timed out (${timeoutMs}ms)`)), timeoutMs)
-          ),
-        ]);
-      };
+    const configuredModel = process.env.GEMINI_MODEL?.trim();
+    const candidateModels = [
+      ...(configuredModel ? [configuredModel] : []),
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-2.5-pro",
+      "gemini-2.0-flash-lite"
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
 
-      const configuredModel = process.env.GEMINI_MODEL?.trim();
-      const candidateModels = [
-        ...(configuredModel ? [configuredModel] : []),
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-2.5-pro",
-        "gemini-2.0-flash-lite"
-      ].filter((v, i, a) => v && a.indexOf(v) === i);
-
-      keyLoop: for (const { client: ai, keyId } of geminiClients) {
-        for (const modelName of candidateModels) {
-          try {
-            console.log(`Attempting Gemini detection with key '${keyId}' and model '${modelName}'...`);
-            const response = await callWithTimeout(
-              ai.models.generateContent({
-                model: modelName,
-                contents: [imagePart, textPart],
-                config: {
-                  temperature: 0.1,
-                  responseMimeType: "application/json",
-                  responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                      cards: {
-                        type: Type.ARRAY,
-                        items: {
-                          type: Type.OBJECT,
-                          properties: {
-                            box_2d: {
-                              type: Type.ARRAY,
-                              items: { type: Type.INTEGER }
-                            },
-                            label: { type: Type.STRING },
-                            amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
-                            date: { type: Type.STRING },
-                            confidence: { type: Type.NUMBER }
+    keyLoop: for (const { client: ai, keyId } of geminiClients) {
+      for (const modelName of candidateModels) {
+        try {
+          console.log(`Attempting Gemini detection with key '${keyId}' and model '${modelName}'...`);
+          const response = await callWithTimeout(
+            ai.models.generateContent({
+              model: modelName,
+              contents: [imagePart, textPart],
+              config: {
+                temperature: 0.1,
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    cards: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          box_2d: {
+                            type: Type.ARRAY,
+                            items: { type: Type.INTEGER }
                           },
-                          required: ["box_2d"]
-                        }
-                      },
-                      summary_date: { type: Type.STRING },
-                      total_amount: { type: Type.NUMBER }
+                          label: { type: Type.STRING },
+                          amount: { type: Type.STRING, description: "Numeric string or evaluated math value" },
+                          date: { type: Type.STRING },
+                          confidence: { type: Type.NUMBER }
+                        },
+                        required: ["box_2d"]
+                      }
                     },
-                    required: ["cards"]
-                  }
+                    summary_date: { type: Type.STRING },
+                    total_amount: { type: Type.NUMBER }
+                  },
+                  required: ["cards"]
                 }
-              }),
-              10000
-            );
-            if (response && response.text) {
-              console.log(`Success using key '${keyId}' and Gemini model '${modelName}'`);
-              responseText = response.text;
-              break keyLoop;
-            }
-          } catch (err: any) {
-            const errMsg = err?.message || String(err);
-            console.warn(`Gemini model '${modelName}' with key '${keyId}' failed:`, errMsg);
-            lastError = err;
-            if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota')) {
-              console.warn(`Key '${keyId}' hit 429 Quota Exceeded. Switching to next Key...`);
-              break;
-            }
+              }
+            }),
+            35000
+          );
+          if (response && response.text) {
+            console.log(`Success using key '${keyId}' and Gemini model '${modelName}'`);
+            responseText = response.text;
+            break keyLoop;
+          }
+        } catch (err: any) {
+          const errMsg = err?.message || String(err);
+          console.warn(`Gemini model '${modelName}' with key '${keyId}' failed:`, errMsg);
+          lastError = err;
+          if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota')) {
+            console.warn(`Key '${keyId}' hit 429 Quota Exceeded. Switching to next Key if configured...`);
+            break;
           }
         }
       }
@@ -306,42 +288,32 @@ Return JSON format with a 'cards' array.`;
       console.error("Gemini Vision API failed. Last error:", lastError);
       let rawErr = lastError?.message || '';
 
-      if (relayErrorMsg && geminiClients.length === 0) {
-        res.status(500).json({ error: `中转 API 调用失败: ${relayErrorMsg}` });
-        return;
-      }
-
       let userFriendlyMsg = `Gemini API 调用失败: ${rawErr || 'AI 识别服务未响应'}`;
       if (rawErr.includes('429') || rawErr.includes('RESOURCE_EXHAUSTED') || rawErr.includes('Quota')) {
-        if (relayErrorMsg) {
-          userFriendlyMsg = `中转 API 失败 (${relayErrorMsg})，且官方免费 Key 已达到调用上限`;
-        } else {
-          userFriendlyMsg = 'Gemini API 免费层级调用频次受限 (429 Quota Exceeded)，请稍后再试或配置付费 Key';
-        }
-      } else if (relayErrorMsg) {
-        userFriendlyMsg = `中转 API 报错: ${relayErrorMsg}`;
+        userFriendlyMsg = 'Gemini API 免费额度已达上限或触发频率限制 (429 Quota Exceeded)，请在 Vercel 后台更换有效的 GEMINI_API_KEY';
       }
       res.status(500).json({ error: userFriendlyMsg });
       return;
     }
 
-    let cleanedJsonText = responseText.trim();
-    if (cleanedJsonText.startsWith("```json")) {
-      cleanedJsonText = cleanedJsonText.replace(/^```json\s*/, "").replace(/\s*```$/, "");
-    } else if (cleanedJsonText.startsWith("```")) {
-      cleanedJsonText = cleanedJsonText.replace(/^```\s*/, "").replace(/\s*```$/, "");
-    }
-
     let parsed: any = {};
     try {
-      parsed = JSON.parse(cleanedJsonText);
+      parsed = extractAndParseJson(responseText);
     } catch (parseErr) {
       console.error("Failed to parse Gemini response as JSON:", responseText);
       res.status(500).json({ error: "AI 输出的 JSON 数据格式无法正常解析" });
       return;
     }
 
-    const cards = Array.isArray(parsed.cards) ? parsed.cards : [];
+    const cards = Array.isArray(parsed.cards)
+      ? parsed.cards
+      : Array.isArray(parsed.items)
+      ? parsed.items
+      : Array.isArray(parsed.card_list)
+      ? parsed.card_list
+      : Array.isArray(parsed.boxes)
+      ? parsed.boxes
+      : [];
 
     // Format cards with unique IDs and cardIndex
     const formattedCards = cards.map((c: any, index: number) => {
