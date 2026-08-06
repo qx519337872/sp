@@ -219,8 +219,8 @@ For EACH card detected:
 2. Extract the card label or tag code (e.g. 'A654', 'かおり').
 3. Extract the price or amount:
    - If price shows an expression like '3+2', '3*2', or '3x2', calculate MULTIPLICATION (3 * 2 = 6). Return 6.
+   - If price is '058' or '0' or gift, return '058' (or 0).
    - If price is a single number like '560', '220', '440', return 560, 220, 440.
-   - If gift/freebie (0 price), return 0.
 4. Extract date on the card in M/D format (e.g. '7/30', '7/31').
 
 Return JSON format with a 'cards' array.`;

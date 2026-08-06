@@ -1,9 +1,10 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Kalam:wght@700&family=Long+Cang&family=Ma+Shan+Zheng&family=Zhi+Mang+Xing&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Zhi+Mang+Xing&family=Long+Cang&family=Ma+Shan+Zheng&family=Indie+Flower&family=Shadows+Into+Light&display=swap');
 
 @font-face {
   font-family: 'MyCustomFont';
-  src: url('/fonts/custom-font.ttf') format('truetype'),
+  src: url('/fonts/custom-handwriting.ttf') format('truetype'),
+       url('/fonts/custom-font.ttf') format('truetype'),
        url('/fonts/custom-font.woff2') format('woff2'),
        url('/fonts/custom-font.woff') format('woff');
   font-weight: normal;
@@ -12,6 +13,7 @@
 }
 
 .font-handwriting {
-  font-family: 'Kalam', 'Caveat', 'Zhi Mang Xing', 'Ma Shan Zheng', 'Long Cang', cursive, sans-serif;
+  font-family: 'MyCustomFont', 'Zhi Mang Xing', 'Long Cang', 'Ma Shan Zheng', 'Indie Flower', 'Shadows Into Light', cursive, sans-serif;
 }
+
 

@@ -4,6 +4,7 @@ import { CardCanvasOverlay } from './components/CardCanvasOverlay';
 import { CardEditorList } from './components/CardEditorList';
 import { ResultSynthesizer } from './components/ResultSynthesizer';
 import { DetectedCard, DetectionResult } from './types';
+import { calculateTotalAmount, isGiftAmount } from './utils/format';
 import { ScanSearch, Camera, Image as ImageIcon, Check, ArrowLeft, RefreshCcw, Sparkles, X, Plus, Trash2, Calendar, DollarSign } from 'lucide-react';
 
 const getTodayMD = () => {
@@ -179,10 +180,7 @@ export default function App() {
     setErrorMsg(null);
   };
 
-  const totalAmount = cards.reduce((sum, c) => {
-    const val = parseFloat(String(c.amount));
-    return sum + (!isNaN(val) && val > 0 ? val : 0);
-  }, 0);
+  const totalAmount = calculateTotalAmount(cards);
 
   // Draw overlay canvas for verify modal
   useEffect(() => {
@@ -416,6 +414,7 @@ export default function App() {
               totalAmount={totalAmount}
               itemCount={cards.length}
               summaryDate={summaryDate}
+              cards={cards}
               onRestart={handleRestart}
             />
           </div>

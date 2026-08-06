@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { DetectedCard } from '../types';
-import { Plus, Trash2, Calendar, Tag, CreditCard, Sparkles } from 'lucide-react';
+import { calculateTotalAmount, isGiftAmount, formatAmountWithCommas } from '../utils/format';
+import { Plus, Trash2, Calendar, Tag, CreditCard, Sparkles, Gift } from 'lucide-react';
 
 interface Props {
   imageSrc: string;
@@ -66,11 +67,7 @@ export const CardEditorList: React.FC<Props> = ({
   onUpdateSummaryDate,
 }) => {
   // Calculate total amount and count
-  const totalAmount = cards.reduce((sum, card) => {
-    const val = parseFloat(String(card.amount));
-    return sum + (!isNaN(val) && val > 0 ? val : 0);
-  }, 0);
-
+  const totalAmount = calculateTotalAmount(cards);
   const itemCount = cards.length;
 
   return (
@@ -151,16 +148,22 @@ export const CardEditorList: React.FC<Props> = ({
                   </div>
 
                   {/* Amount */}
-                  <div className="flex items-center gap-1 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 focus-within:border-rose-400">
-                    <span className="text-xs font-bold text-rose-500">￥</span>
-                    <input
-                      type="number"
-                      step="any"
-                      value={card.amount}
-                      onChange={(e) => onUpdateCard(card.id, 'amount', e.target.value)}
-                      placeholder="金额"
-                      className="w-full text-xs font-semibold text-slate-800 bg-transparent focus:outline-none"
-                    />
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 focus-within:border-rose-400">
+                      <span className="text-xs font-bold text-rose-500">￥</span>
+                      <input
+                        type="text"
+                        value={card.amount}
+                        onChange={(e) => onUpdateCard(card.id, 'amount', e.target.value)}
+                        placeholder="金额"
+                        className="w-full text-xs font-semibold text-slate-800 bg-transparent focus:outline-none"
+                      />
+                    </div>
+                    {isGiftAmount(card.amount) && (
+                      <span className="text-[10px] text-amber-600 font-medium px-1 flex items-center gap-0.5">
+                        <Gift className="w-2.5 h-2.5 inline" /> 0开头为赠品 (只加件数不加金额)
+                      </span>
+                    )}
                   </div>
 
                   {/* Date */}
@@ -209,7 +212,7 @@ export const CardEditorList: React.FC<Props> = ({
           <div>
             <div className="text-[10px] text-rose-300 uppercase tracking-wider">合计金额</div>
             <div className="text-xl font-black text-rose-400">
-              ￥{Number.isInteger(totalAmount) ? totalAmount : totalAmount.toFixed(2)}
+              ￥{formatAmountWithCommas(totalAmount)}
             </div>
           </div>
         </div>

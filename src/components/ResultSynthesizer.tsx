@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Download, RefreshCw, CheckCircle2, Share2, Image as ImageIcon, Sparkles, Smartphone, Eye } from 'lucide-react';
+import { formatAmountWithCommas } from '../utils/format';
+import { DetectedCard } from '../types';
 
 interface Props {
   originalImageSrc: string;
   totalAmount: number;
   itemCount: number;
   summaryDate: string;
+  cards?: DetectedCard[];
   onRestart: () => void;
 }
 
@@ -14,6 +17,7 @@ export const ResultSynthesizer: React.FC<Props> = ({
   totalAmount,
   itemCount,
   summaryDate,
+  cards = [],
   onRestart,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -21,6 +25,7 @@ export const ResultSynthesizer: React.FC<Props> = ({
   const [isGenerating, setIsGenerating] = useState(true);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
+  const [autoCrop, setAutoCrop] = useState(true); // Default auto-crop on to cut off legs/basket at bottom
 
   useEffect(() => {
     if (!originalImageSrc) return;
@@ -35,21 +40,56 @@ export const ResultSynthesizer: React.FC<Props> = ({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      canvas.width = img.naturalWidth || 800;
-      canvas.height = img.naturalHeight || 800;
+      const fullW = img.naturalWidth || 800;
+      const fullH = img.naturalHeight || 800;
 
-      // Draw original background image
-      ctx.drawImage(img, 0, 0);
+      // Calculate auto-crop box (cut off legs / basket / empty desk at bottom if present)
+      let cropSx = 0;
+      let cropSy = 0;
+      let cropSw = fullW;
+      let cropSh = fullH;
+
+      if (autoCrop && cards && cards.length > 0) {
+        let minY = 1, minX = 1, maxY = 0, maxX = 0;
+        let validBoxes = 0;
+        cards.forEach((c) => {
+          if (c.box_2d && c.box_2d.length === 4) {
+            const [y1, x1, y2, x2] = c.box_2d;
+            minY = Math.min(minY, y1 / 1000);
+            minX = Math.min(minX, x1 / 1000);
+            maxY = Math.max(maxY, y2 / 1000);
+            maxX = Math.max(maxX, x2 / 1000);
+            validBoxes++;
+          }
+        });
+
+        if (validBoxes > 0 && maxY > minY) {
+          // Crop margins: 5% around cards, plus extra bottom margin (+0.24) for handwritten total
+          const cropMinX = Math.max(0, minX - 0.05);
+          const cropMaxX = Math.min(1, maxX + 0.05);
+          const cropMinY = Math.max(0, minY - 0.05);
+          const cropMaxY = Math.min(1, maxY + 0.24); // Leaves clean space for handwritten block below cards
+
+          cropSx = Math.round(cropMinX * fullW);
+          cropSy = Math.round(cropMinY * fullH);
+          cropSw = Math.round((cropMaxX - cropMinX) * fullW);
+          cropSh = Math.round((cropMaxY - cropMinY) * fullH);
+        }
+      }
+
+      canvas.width = cropSw;
+      canvas.height = cropSh;
+
+      // Draw cropped/full background image region
+      ctx.drawImage(img, cropSx, cropSy, cropSw, cropSh, 0, 0, cropSw, cropSh);
 
       const shortSide = Math.min(canvas.width, canvas.height);
-      const fontSizeBig = Math.round(shortSide * 0.105);
-      const fontSizeMid = Math.round(shortSide * 0.06);
+      const fontSizeBig = Math.round(shortSide * 0.072);
+      const fontSizeMid = Math.round(shortSide * 0.045);
       const padding = Math.round(shortSide * 0.035);
 
-      // Format text values
-      const totalStr = Number.isInteger(totalAmount)
-        ? String(totalAmount)
-        : totalAmount.toFixed(2);
+      // Format text values with thousands comma separators from the right (e.g. 2,020 or 4,810)
+      const totalStr = formatAmountWithCommas(totalAmount);
 
       let dateMD = summaryDate;
       if (!dateMD || !dateMD.includes('/')) {
@@ -60,35 +100,36 @@ export const ResultSynthesizer: React.FC<Props> = ({
       }
       const countStr = `${itemCount}件`;
 
-      // Authentic Handwritten Fonts (Google Fonts loaded via CDN + CSS):
-      const fontEn = '"Kalam", "Caveat", cursive, sans-serif';
-      const fontCn = '"Zhi Mang Xing", "Ma Shan Zheng", "Long Cang", cursive, sans-serif';
+      // Hand writing fonts: 'MyCustomFont' defined in backend index.css is loaded first if uploaded by owner!
+      // 'Zhi Mang Xing', 'Long Cang', 'Ma Shan Zheng', 'Indie Flower' render authentic pen-drawn digits without crossbar on '7'
+      const fontHandwriting = '"MyCustomFont", "Zhi Mang Xing", "Long Cang", "Ma Shan Zheng", "Indie Flower", "Shadows Into Light", cursive, sans-serif';
+      const fontEn = fontHandwriting;
+      const fontCn = fontHandwriting;
       
-      // Deep blue gel/ballpoint pen ink color matching sample photo
-      const inkColorPrimary = '#0d43b7';
-      const inkColorSecondary = '#0b399d';
+      // Gel pen / ballpoint ink color matching sample photo (#0f4dc7)
+      const inkColorPrimary = '#0f4dc7';
 
       ctx.save();
-      ctx.font = `700 ${fontSizeBig}px ${fontEn}`;
+      ctx.font = `normal ${fontSizeBig}px ${fontEn}`;
       const totalW = ctx.measureText(totalStr).width;
 
-      ctx.font = `700 ${fontSizeMid}px ${fontEn}`;
+      ctx.font = `normal ${fontSizeMid}px ${fontEn}`;
       const dateW = ctx.measureText(dateMD).width;
 
-      ctx.font = `700 ${fontSizeMid}px ${fontCn}`;
+      ctx.font = `normal ${fontSizeMid}px ${fontCn}`;
       const countW = ctx.measureText(countStr).width;
       ctx.restore();
 
       const leftColW = Math.max(dateW, countW);
       const blockW = leftColW + padding * 0.9 + totalW;
-      const blockH = fontSizeMid * 1.25 + fontSizeMid * 1.25;
+      const blockH = fontSizeMid * 1.2 + fontSizeMid * 1.2;
 
       const boxX = canvas.width - padding * 1.2 - blockW;
       const boxY = canvas.height - padding * 1.2 - blockH;
 
       // Soft paper-like clean backdrop pad with slight rounded corners
       ctx.save();
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.93)';
       const r = padding * 0.5;
       ctx.beginPath();
       ctx.moveTo(boxX - padding * 0.5 + r, boxY - padding * 0.5);
@@ -103,21 +144,23 @@ export const ResultSynthesizer: React.FC<Props> = ({
       ctx.stroke();
       ctx.restore();
 
-      // Helper function to draw realistic handwritten strokes
+      // Slender, slanted gel pen handwriting rendering matching sample photo 1 & 2
       const drawHandwrittenText = (
         text: string,
         x: number,
         y: number,
         fSize: number,
         fontFamily: string,
-        angleDeg: number
+        baseAngleDeg = -4.0 // Natural forward slant for right-handed speed pen handwriting
       ) => {
         ctx.save();
         ctx.translate(x, y);
-        ctx.rotate((angleDeg * Math.PI) / 180);
-        ctx.font = `700 ${fSize}px ${fontFamily}`;
+        ctx.rotate((baseAngleDeg * Math.PI) / 180);
+        ctx.font = `normal ${fSize}px ${fontFamily}`;
         ctx.textBaseline = 'alphabetic';
         ctx.textAlign = 'left';
+        ctx.fillStyle = inkColorPrimary;
+        ctx.globalAlpha = 0.96;
 
         let cursorX = 0;
         const chars = String(text).split('');
@@ -126,24 +169,16 @@ export const ResultSynthesizer: React.FC<Props> = ({
           const charW = ctx.measureText(char).width;
 
           ctx.save();
-          const jitterAngle = Math.sin(i * 1.9 + x) * 2.5 * (Math.PI / 180);
-          const jitterY = Math.cos(i * 2.7 + y) * 1.1;
+          // Subtle organic character variation
+          const charAngle = Math.sin(i * 1.7 + x) * 1.2 * (Math.PI / 180);
+          const charY = Math.cos(i * 2.5 + y) * 0.4;
 
-          ctx.translate(cursorX, jitterY);
-          ctx.rotate(jitterAngle);
-
-          // Pass 1: Slightly offset ink bleed background
-          ctx.fillStyle = inkColorSecondary;
-          ctx.globalAlpha = 0.45;
-          ctx.fillText(char, 0.6, 0.6);
-
-          // Pass 2: Main vibrant blue pen ink
-          ctx.fillStyle = inkColorPrimary;
-          ctx.globalAlpha = 0.98;
+          ctx.translate(cursorX, charY);
+          ctx.rotate(charAngle);
           ctx.fillText(char, 0, 0);
-
           ctx.restore();
-          cursorX += charW;
+
+          cursorX += charW * 0.93; // Natural character spacing for handwritten pen
         }
         ctx.restore();
       };
@@ -152,9 +187,9 @@ export const ResultSynthesizer: React.FC<Props> = ({
       const leftX = boxX;
       const rightX = boxX + leftColW + padding * 0.9;
 
-      drawHandwrittenText(dateMD, leftX, boxY + fontSizeMid * 0.95, fontSizeMid, fontEn, -2);
-      drawHandwrittenText(countStr, leftX, boxY + fontSizeMid * 0.95 + fontSizeMid * 1.25, fontSizeMid, fontCn, -2.5);
-      drawHandwrittenText(totalStr, rightX, boxY + fontSizeBig * 0.9, fontSizeBig, fontEn, -1.5);
+      drawHandwrittenText(dateMD, leftX, boxY + fontSizeMid * 0.9, fontSizeMid, fontEn, -4.5);
+      drawHandwrittenText(countStr, leftX, boxY + fontSizeMid * 0.9 + fontSizeMid * 1.2, fontSizeMid, fontCn, -4.5);
+      drawHandwrittenText(totalStr, rightX, boxY + fontSizeBig * 0.9, fontSizeBig, fontEn, -4.0);
 
       try {
         const url = canvas.toDataURL('image/jpeg', 0.92);
@@ -167,15 +202,17 @@ export const ResultSynthesizer: React.FC<Props> = ({
     };
 
     const synthesize = async () => {
-      // 1. Font load check with fast timeout guard (never hang mobile rendering)
+      // 1. Font load check with fast timeout guard
       if (document.fonts) {
         try {
           await Promise.race([
             Promise.allSettled([
-              document.fonts.load('700 36px "Kalam"'),
-              document.fonts.load('700 36px "Caveat"'),
-              document.fonts.load('700 36px "Zhi Mang Xing"'),
-              document.fonts.load('700 36px "Ma Shan Zheng"'),
+              document.fonts.load('36px "MyCustomFont"'),
+              document.fonts.load('36px "Zhi Mang Xing"'),
+              document.fonts.load('36px "Long Cang"'),
+              document.fonts.load('36px "Ma Shan Zheng"'),
+              document.fonts.load('36px "Indie Flower"'),
+              document.fonts.load('36px "Shadows Into Light"'),
             ]),
             new Promise((res) => setTimeout(res, 400)),
           ]);
@@ -232,7 +269,7 @@ export const ResultSynthesizer: React.FC<Props> = ({
     return () => {
       isMounted = false;
     };
-  }, [originalImageSrc, totalAmount, itemCount, summaryDate]);
+  }, [originalImageSrc, totalAmount, itemCount, summaryDate, cards, autoCrop]);
 
   // Directly save / share to photo album
   const handleSaveToGallery = async () => {
@@ -318,6 +355,7 @@ export const ResultSynthesizer: React.FC<Props> = ({
           />
         )}
       </div>
+
 
       {/* Two Action Buttons: Left = 重新选图, Right = 保存至手机相册 */}
       <div className="flex items-center gap-2 sm:gap-3 w-full">
