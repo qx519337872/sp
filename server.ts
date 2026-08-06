@@ -251,7 +251,21 @@ Return JSON format with a 'cards' array.`;
     };
     const textPart = { text: promptText };
 
-    const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 35000): Promise<T> => {
+    // 1. Enforce global rate limiter ONCE per incoming request to avoid 429
+    await enforceRateLimitAndDelay();
+
+    const configuredModel = process.env.GEMINI_MODEL?.trim();
+    // Fast primary vision models first, then lite models
+    const candidateModels = [
+      ...(configuredModel ? [configuredModel] : []),
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-3.5-flash-lite",
+      "gemini-2.5-flash-lite"
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
+
+    const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 25000): Promise<T> => {
       return Promise.race([
         promise,
         new Promise<T>((_, reject) =>
@@ -260,24 +274,9 @@ Return JSON format with a 'cards' array.`;
       ]);
     };
 
-    const configuredModel = process.env.GEMINI_MODEL?.trim();
-    // Default model sequence: primary configured model, then high-quota models like gemini-3.1-flash-lite & 3.5-flash-lite (500 RPD), then 2.0-flash & 2.5-flash
-    const candidateModels = [
-      ...(configuredModel ? [configuredModel] : []),
-      "gemini-3.1-flash-lite",
-      "gemini-3.5-flash-lite",
-      "gemini-2.0-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-2.5-flash",
-      "gemini-2.0-flash-lite"
-    ].filter((v, i, a) => v && a.indexOf(v) === i);
-
     keyLoop: for (const { client: ai, keyId } of geminiClients) {
       for (const modelName of candidateModels) {
         try {
-          // Enforce max 14 RPM rate limit and smooth gap delay before making API call
-          await enforceRateLimitAndDelay();
-
           console.log(`Attempting Gemini detection with key '${keyId}' and model '${modelName}'...`);
           const response = await callWithTimeout(
             ai.models.generateContent({
@@ -313,7 +312,7 @@ Return JSON format with a 'cards' array.`;
                 }
               }
             }),
-            35000
+            25000
           );
           if (response && response.text) {
             console.log(`Success using key '${keyId}' and Gemini model '${modelName}'`);
@@ -325,8 +324,7 @@ Return JSON format with a 'cards' array.`;
           console.warn(`Gemini model '${modelName}' with key '${keyId}' failed:`, errMsg);
           lastError = err;
           if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota')) {
-            console.warn(`Hit 429 Quota Exceeded on ${modelName}. Waiting 3.5s before fallback model...`);
-            await new Promise((r) => setTimeout(r, 3500));
+            console.warn(`Hit 429 Quota Exceeded on ${modelName}. Switching key/model...`);
           }
         }
       }

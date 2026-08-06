@@ -234,11 +234,33 @@ export const ResultSynthesizer: React.FC<Props> = ({
     };
   }, [originalImageSrc, totalAmount, itemCount, summaryDate]);
 
-  // Directly save / download image
-  const handleSaveToGallery = () => {
+  // Directly save / share to photo album
+  const handleSaveToGallery = async () => {
     if (!synthesizedUrl) return;
 
     const fileName = `账单汇总_${summaryDate.replace('/', '_') || 'today'}.jpg`;
+
+    // 1. Try Web Share API (native share sheet on iOS Safari / Android Chrome / WeChat)
+    try {
+      if (navigator.share && navigator.canShare) {
+        const response = await fetch(synthesizedUrl);
+        const blob = await response.blob();
+        const file = new File([blob], fileName, { type: 'image/jpeg' });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: '账单汇总',
+          });
+          setShareSuccess(true);
+          setTimeout(() => setShareSuccess(false), 4000);
+          return;
+        }
+      }
+    } catch (shareErr) {
+      console.log('Native share cancelled or failed, falling back to download:', shareErr);
+    }
+
+    // 2. Standard download link fallback
     const link = document.createElement('a');
     link.href = synthesizedUrl;
     link.download = fileName;
@@ -246,7 +268,7 @@ export const ResultSynthesizer: React.FC<Props> = ({
     link.click();
     document.body.removeChild(link);
 
-    // On mobile devices (iOS/Android), also show preview modal so user can long-press to save to album directly
+    // 3. On mobile devices, automatically show the preview modal with long-press tip
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     if (isMobile) {
       setTimeout(() => {
