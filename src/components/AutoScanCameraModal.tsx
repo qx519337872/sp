@@ -18,11 +18,22 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
   const [clarityScore, setClarityScore] = useState<number>(0);
   const [isStable, setIsStable] = useState<boolean>(false);
   const [autoCaptureEnabled, setAutoCaptureEnabled] = useState<boolean>(true);
+  const autoCaptureEnabledRef = useRef<boolean>(true);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
 
   const stableCounterRef = useRef<number>(0);
   const isCapturingRef = useRef<boolean>(false);
+
+  // Keep autoCaptureEnabledRef in sync with state
+  useEffect(() => {
+    autoCaptureEnabledRef.current = autoCaptureEnabled;
+    if (!autoCaptureEnabled) {
+      stableCounterRef.current = 0;
+      setCountdown(null);
+      isCapturingRef.current = false;
+    }
+  }, [autoCaptureEnabled]);
 
   // Start Camera Stream
   useEffect(() => {
@@ -185,8 +196,8 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
           setIsStable(isFrameStable);
 
           // Auto capture logic:
-          // If frame is sharp & hand is steady for 6 consecutive checks (~900ms)
-          if (autoCaptureEnabled && isHighClarity && isFrameStable) {
+          // If auto capture is enabled, frame is sharp & hand is steady for 6 consecutive checks (~900ms)
+          if (autoCaptureEnabledRef.current && isHighClarity && isFrameStable) {
             stableCounterRef.current += 1;
             if (stableCounterRef.current >= 6) {
               triggerSnap();
@@ -204,14 +215,21 @@ export const AutoScanCameraModal: React.FC<Props> = ({ isOpen, onClose, onCaptur
   };
 
   const triggerSnap = () => {
-    if (isCapturingRef.current || !videoRef.current) return;
+    if (!autoCaptureEnabledRef.current || isCapturingRef.current || !videoRef.current) return;
     isCapturingRef.current = true;
 
-    // Gentle countdown: 3, 2, 1 (850ms per tick for elderly friendliness)
+    // Gentle countdown: 3, 2, 1 (850ms per tick)
     let count = 3;
     setCountdown(count);
 
     const timer = setInterval(() => {
+      if (!autoCaptureEnabledRef.current) {
+        clearInterval(timer);
+        setCountdown(null);
+        isCapturingRef.current = false;
+        return;
+      }
+
       count -= 1;
       if (count <= 0) {
         clearInterval(timer);
