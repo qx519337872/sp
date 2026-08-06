@@ -255,14 +255,11 @@ Return JSON format with a 'cards' array.`;
     await enforceRateLimitAndDelay();
 
     const configuredModel = process.env.GEMINI_MODEL?.trim();
-    // Fast primary vision models first, then lite models
+    // Primary fast vision model first, then fallback
     const candidateModels = [
       ...(configuredModel ? [configuredModel] : []),
       "gemini-2.5-flash",
       "gemini-2.0-flash",
-      "gemini-3.1-flash-lite",
-      "gemini-3.5-flash-lite",
-      "gemini-2.5-flash-lite"
     ].filter((v, i, a) => v && a.indexOf(v) === i);
 
     const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 25000): Promise<T> => {

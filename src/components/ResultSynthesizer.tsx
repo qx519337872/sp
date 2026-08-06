@@ -101,22 +101,21 @@ export const ResultSynthesizer: React.FC<Props> = ({
       const countStr = `${itemCount}件`;
 
       // Hand writing fonts: 'MyCustomFont' defined in backend index.css is loaded first if uploaded by owner!
-      // 'Zhi Mang Xing', 'Long Cang', 'Ma Shan Zheng', 'Indie Flower' render authentic pen-drawn digits without crossbar on '7'
-      const fontHandwriting = '"MyCustomFont", "Zhi Mang Xing", "Long Cang", "Ma Shan Zheng", "Indie Flower", "Shadows Into Light", cursive, sans-serif';
-      const fontEn = fontHandwriting;
-      const fontCn = fontHandwriting;
+      // 'Caveat', 'Architects Daughter', 'Patrick Hand' render authentic slender ballpoint/gel-pen digits without crossbar on '7'
+      const fontEn = '"MyCustomFont", "Caveat", "Architects Daughter", "Patrick Hand", "Shadows Into Light", "Indie Flower", cursive, sans-serif';
+      const fontCn = '"MyCustomFont", "Zhi Mang Xing", "Long Cang", "Ma Shan Zheng", cursive, sans-serif';
       
       // Gel pen / ballpoint ink color matching sample photo (#0f4dc7)
       const inkColorPrimary = '#0f4dc7';
 
       ctx.save();
-      ctx.font = `normal ${fontSizeBig}px ${fontEn}`;
+      ctx.font = `400 ${fontSizeBig}px ${fontEn}`;
       const totalW = ctx.measureText(totalStr).width;
 
-      ctx.font = `normal ${fontSizeMid}px ${fontEn}`;
+      ctx.font = `400 ${fontSizeMid}px ${fontEn}`;
       const dateW = ctx.measureText(dateMD).width;
 
-      ctx.font = `normal ${fontSizeMid}px ${fontCn}`;
+      ctx.font = `400 ${fontSizeMid}px ${fontCn}`;
       const countW = ctx.measureText(countStr).width;
       ctx.restore();
 
@@ -156,7 +155,7 @@ export const ResultSynthesizer: React.FC<Props> = ({
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate((baseAngleDeg * Math.PI) / 180);
-        ctx.font = `normal ${fSize}px ${fontFamily}`;
+        ctx.font = `400 ${fSize}px ${fontFamily}`;
         ctx.textBaseline = 'alphabetic';
         ctx.textAlign = 'left';
         ctx.fillStyle = inkColorPrimary;
@@ -207,12 +206,13 @@ export const ResultSynthesizer: React.FC<Props> = ({
         try {
           await Promise.race([
             Promise.allSettled([
-              document.fonts.load('36px "MyCustomFont"'),
-              document.fonts.load('36px "Zhi Mang Xing"'),
-              document.fonts.load('36px "Long Cang"'),
-              document.fonts.load('36px "Ma Shan Zheng"'),
-              document.fonts.load('36px "Indie Flower"'),
-              document.fonts.load('36px "Shadows Into Light"'),
+              document.fonts.load('400 36px "MyCustomFont"'),
+              document.fonts.load('400 36px "Caveat"'),
+              document.fonts.load('400 36px "Architects Daughter"'),
+              document.fonts.load('400 36px "Patrick Hand"'),
+              document.fonts.load('400 36px "Shadows Into Light"'),
+              document.fonts.load('400 36px "Zhi Mang Xing"'),
+              document.fonts.load('400 36px "Long Cang"'),
             ]),
             new Promise((res) => setTimeout(res, 400)),
           ]);

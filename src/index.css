@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Zhi+Mang+Xing&family=Long+Cang&family=Ma+Shan+Zheng&family=Indie+Flower&family=Shadows+Into+Light&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;500&family=Architects+Daughter&family=Patrick+Hand&family=Shadows+Into+Light&family=Indie+Flower&family=Zhi+Mang+Xing&family=Long+Cang&family=Ma+Shan+Zheng&display=swap');
 
 @font-face {
   font-family: 'MyCustomFont';
@@ -13,7 +13,7 @@
 }
 
 .font-handwriting {
-  font-family: 'MyCustomFont', 'Zhi Mang Xing', 'Long Cang', 'Ma Shan Zheng', 'Indie Flower', 'Shadows Into Light', cursive, sans-serif;
+  font-family: 'MyCustomFont', 'Caveat', 'Architects Daughter', 'Patrick Hand', 'Shadows Into Light', 'Indie Flower', 'Zhi Mang Xing', 'Long Cang', 'Ma Shan Zheng', cursive, sans-serif;
 }
 
 
