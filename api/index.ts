@@ -150,6 +150,48 @@ function parseAndEvaluateAmount(amountInput: any): number | string {
   return rawStr;
 }
 
+// Rate limiter helper to strictly avoid Gemini API 429 Rate Limit (15 RPM / max 14 calls per min)
+const requestTimestamps: number[] = [];
+let lastCallTimestamp = 0;
+
+async function enforceRateLimitAndDelay(): Promise<void> {
+  const WINDOW_MS = 60000;
+  const MAX_PER_WINDOW = 14; // Strictly cap at 14 calls per minute
+  const MIN_GAP_MS = 4300;   // Enforce ~4.3s minimum gap between consecutive calls
+
+  let now = Date.now();
+
+  // 1. Minimum gap enforcement between consecutive API calls
+  const timeSinceLast = now - lastCallTimestamp;
+  if (timeSinceLast < MIN_GAP_MS) {
+    const gapDelay = MIN_GAP_MS - timeSinceLast;
+    console.log(`[RateLimiter] Smooth rate control: delaying ${gapDelay}ms to maintain <14 RPM...`);
+    await new Promise((r) => setTimeout(r, gapDelay));
+    now = Date.now();
+  }
+
+  // 2. Sliding 60-second window capacity enforcement
+  while (true) {
+    const windowStart = now - WINDOW_MS;
+    while (requestTimestamps.length > 0 && requestTimestamps[0] < windowStart) {
+      requestTimestamps.shift();
+    }
+
+    if (requestTimestamps.length < MAX_PER_WINDOW) {
+      break;
+    }
+
+    const oldest = requestTimestamps[0];
+    const waitTime = (oldest + WINDOW_MS) - now + 300;
+    console.log(`[RateLimiter] 60s rate limit window full (${requestTimestamps.length}/${MAX_PER_WINDOW}). Pausing ${waitTime}ms...`);
+    await new Promise((r) => setTimeout(r, waitTime));
+    now = Date.now();
+  }
+
+  lastCallTimestamp = Date.now();
+  requestTimestamps.push(lastCallTimestamp);
+}
+
 // API Route for product card detection
 app.post("/api/detect-cards", async (req, res) => {
   try {
@@ -204,17 +246,23 @@ Return JSON format with a 'cards' array.`;
     };
 
     const configuredModel = process.env.GEMINI_MODEL?.trim();
+    // Default model sequence: primary configured model, then high-quota models like gemini-3.1-flash-lite & 3.5-flash-lite (500 RPD), then 2.0-flash & 2.5-flash
     const candidateModels = [
       ...(configuredModel ? [configuredModel] : []),
-      "gemini-2.5-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-3.5-flash-lite",
       "gemini-2.0-flash",
-      "gemini-2.5-pro",
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-flash",
       "gemini-2.0-flash-lite"
     ].filter((v, i, a) => v && a.indexOf(v) === i);
 
     keyLoop: for (const { client: ai, keyId } of geminiClients) {
       for (const modelName of candidateModels) {
         try {
+          // Enforce max 14 RPM rate limit and smooth gap delay before making API call
+          await enforceRateLimitAndDelay();
+
           console.log(`Attempting Gemini detection with key '${keyId}' and model '${modelName}'...`);
           const response = await callWithTimeout(
             ai.models.generateContent({
@@ -262,8 +310,8 @@ Return JSON format with a 'cards' array.`;
           console.warn(`Gemini model '${modelName}' with key '${keyId}' failed:`, errMsg);
           lastError = err;
           if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota')) {
-            console.warn(`Key '${keyId}' hit 429 Quota Exceeded. Switching to next Key if configured...`);
-            break;
+            console.warn(`Hit 429 Quota Exceeded on ${modelName}. Waiting 3.5s before fallback model...`);
+            await new Promise((r) => setTimeout(r, 3500));
           }
         }
       }
@@ -271,11 +319,11 @@ Return JSON format with a 'cards' array.`;
 
     if (!responseText) {
       console.error("Gemini Vision API failed. Last error:", lastError);
-      let rawErr = lastError?.message || '';
+      let rawErr = lastError?.message || String(lastError || '未捕获到具体的 API 错误信息');
 
-      let userFriendlyMsg = `Gemini API 调用失败: ${rawErr || 'AI 识别服务未响应'}`;
+      let userFriendlyMsg = `Gemini API 调用失败: ${rawErr}`;
       if (rawErr.includes('429') || rawErr.includes('RESOURCE_EXHAUSTED') || rawErr.includes('Quota')) {
-        userFriendlyMsg = 'Gemini API 免费额度已达上限或触发频率限制 (429 Quota Exceeded)，请在 Vercel 后台更换有效的 GEMINI_API_KEY';
+        userFriendlyMsg = `Gemini 免费版 API 触及频率/额度限制 (429 Quota Exceeded)。原始错误信息: ${rawErr}。建议稍等几秒重试，或在 Vercel 中使用已绑定结算的 GEMINI_API_KEY。`;
       }
       res.status(500).json({ error: userFriendlyMsg });
       return;

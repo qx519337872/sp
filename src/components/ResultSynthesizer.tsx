@@ -60,11 +60,11 @@ export const ResultSynthesizer: React.FC<Props> = ({
       }
       const countStr = `${itemCount}件`;
 
-      // Authentic Handwritten Fonts (Custom User Font > Google Fonts loaded in index.html):
-      const fontEn = 'MyCustomFont, Kalam, Caveat, "Long Cang", cursive, sans-serif';
-      const fontCn = 'MyCustomFont, "Zhi Mang Xing", "Long Cang", "Ma Shan Zheng", cursive, sans-serif';
+      // Authentic Handwritten Fonts (Google Fonts loaded via CDN + CSS):
+      const fontEn = '"Kalam", "Caveat", cursive, sans-serif';
+      const fontCn = '"Zhi Mang Xing", "Ma Shan Zheng", "Long Cang", cursive, sans-serif';
       
-      // Deep blue gel/ballpoint pen ink color matching user sample photo
+      // Deep blue gel/ballpoint pen ink color matching sample photo
       const inkColorPrimary = '#0d43b7';
       const inkColorSecondary = '#0b399d';
 
@@ -167,16 +167,17 @@ export const ResultSynthesizer: React.FC<Props> = ({
     };
 
     const synthesize = async () => {
-      // 1. Font load check with fast 300ms timeout guard (never hang mobile rendering)
+      // 1. Font load check with fast timeout guard (never hang mobile rendering)
       if (document.fonts) {
         try {
           await Promise.race([
             Promise.allSettled([
-              document.fonts.load('700 36px "MyCustomFont"'),
               document.fonts.load('700 36px "Kalam"'),
+              document.fonts.load('700 36px "Caveat"'),
               document.fonts.load('700 36px "Zhi Mang Xing"'),
+              document.fonts.load('700 36px "Ma Shan Zheng"'),
             ]),
-            new Promise((res) => setTimeout(res, 300)),
+            new Promise((res) => setTimeout(res, 400)),
           ]);
         } catch (fontErr) {
           console.warn('Font load check warning:', fontErr);
@@ -191,12 +192,22 @@ export const ResultSynthesizer: React.FC<Props> = ({
 
       let hasHandled = false;
       const triggerRender = () => {
-        if (hasHandled) return;
+        if (!isMounted) return;
         hasHandled = true;
         renderCanvas(img);
       };
 
-      img.onload = triggerRender;
+      img.onload = () => {
+        triggerRender();
+        // Re-render automatically when web fonts finish downloading
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(() => {
+            if (isMounted) {
+              renderCanvas(img);
+            }
+          }).catch(() => {});
+        }
+      };
       img.onerror = () => {
         console.warn('Image load failed, falling back to original');
         if (!hasHandled && isMounted) {

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Kalam:wght@700&family=Long+Cang&family=Ma+Shan+Zheng&family=Zhi+Mang+Xing&display=swap');
 
 @font-face {
   font-family: 'MyCustomFont';
@@ -11,5 +12,6 @@
 }
 
 .font-handwriting {
-  font-family: 'MyCustomFont', 'Kalam', 'Caveat', 'Long Cang', 'Zhi Mang Xing', cursive, sans-serif;
+  font-family: 'Kalam', 'Caveat', 'Zhi Mang Xing', 'Ma Shan Zheng', 'Long Cang', cursive, sans-serif;
 }
+
