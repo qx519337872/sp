@@ -36,7 +36,8 @@ async function callRelayAPI(cleanBase64: string, mimeType: string, promptText: s
   const apiKey = (
     process.env.RELAY_API_KEY ||
     process.env.OPENAI_API_KEY ||
-    process.env.SILICONFLOW_API_KEY
+    process.env.SILICONFLOW_API_KEY ||
+    "sk-tm-VcBvkr26j2npOfzdYy2HvB8RGdJ5iBXTB2l2I9M3LGX10G9o"
   )?.trim();
 
   if (!apiKey) return null;
@@ -45,9 +46,11 @@ async function callRelayAPI(cleanBase64: string, mimeType: string, promptText: s
     process.env.RELAY_BASE_URL ||
     process.env.OPENAI_BASE_URL ||
     process.env.OPENAI_API_BASE ||
-    "https://api.openai.com/v1"
+    "https://api.tokenmix.ai/v1"
   ).trim();
 
+  // Clean baseUrl: remove /chat/completions suffix if user provided full endpoint
+  baseUrl = baseUrl.replace(/\/chat\/completions\/?$/, '');
   baseUrl = baseUrl.replace(/\/+$/, '');
   if (!baseUrl.endsWith('/v1')) {
     baseUrl += '/v1';
@@ -61,43 +64,59 @@ async function callRelayAPI(cleanBase64: string, mimeType: string, promptText: s
 
   console.log(`Attempting Relay API call (${baseUrl}) with model '${model}'...`);
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${cleanBase64}`
-              }
-            },
-            {
-              type: "text",
-              text: promptText + "\nIMPORTANT: Return ONLY a JSON object containing a 'cards' array."
-            }
-          ]
-        }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.1
-    })
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 9000);
 
-  if (response.ok) {
-    const json = await response.json();
-    return json?.choices?.[0]?.message?.content || null;
-  } else {
-    const errText = await response.text();
-    console.warn(`Relay API returned HTTP ${response.status}:`, errText);
-    throw new Error(`中转/第三方 API 请求失败 (${response.status}): ${errText}`);
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mimeType};base64,${cleanBase64}`
+                }
+              },
+              {
+                type: "text",
+                text: promptText + "\nIMPORTANT: Return ONLY a JSON object containing a 'cards' array."
+              }
+            ]
+          }
+        ],
+        response_format: { type: "json_object" },
+        thinking_budget: 0,
+        temperature: 0.1,
+        max_tokens: 2048
+      })
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const json = await response.json();
+      return json?.choices?.[0]?.message?.content || null;
+    } else {
+      const errText = await response.text();
+      console.warn(`Relay API returned HTTP ${response.status}:`, errText);
+      throw new Error(`[HTTP ${response.status}]: ${errText}`);
+    }
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(`[超时]: TokenMix / 中转 API 响应超过 9 秒`);
+    }
+    throw err;
   }
 }
 
@@ -149,7 +168,12 @@ app.post("/api/detect-cards", async (req, res) => {
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
     const geminiClients = getGeminiClients();
-    const hasRelayKey = !!(process.env.RELAY_API_KEY || process.env.OPENAI_API_KEY || process.env.SILICONFLOW_API_KEY);
+    const hasRelayKey = !!(
+      process.env.RELAY_API_KEY ||
+      process.env.OPENAI_API_KEY ||
+      process.env.SILICONFLOW_API_KEY ||
+      "sk-tm-VcBvkr26j2npOfzdYy2HvB8RGdJ5iBXTB2l2I9M3LGX10G9o"
+    );
 
     if (geminiClients.length === 0 && !hasRelayKey) {
       res.status(400).json({ error: "服务器未配置 GEMINI_API_KEY 或 RELAY_API_KEY 环境变量" });
@@ -172,13 +196,15 @@ Return JSON format with a 'cards' array.`;
 
     let responseText: string | null = null;
     let lastError: any = null;
+    let relayErrorMsg: string | null = null;
 
     // 1. Try Relay API (OpenAI compatible) first if configured
     if (hasRelayKey) {
       try {
         responseText = await callRelayAPI(cleanBase64, mimeType, promptText);
       } catch (relayErr: any) {
-        console.warn("Relay API call failed, falling back to Gemini SDK if available:", relayErr?.message || relayErr);
+        relayErrorMsg = relayErr?.message || String(relayErr);
+        console.warn("Relay API call failed, falling back to Gemini SDK if available:", relayErrorMsg);
         lastError = relayErr;
       }
     }
@@ -272,9 +298,21 @@ Return JSON format with a 'cards' array.`;
     if (!responseText) {
       console.error("Gemini Vision API failed. Last error:", lastError);
       let rawErr = lastError?.message || '';
+
+      if (relayErrorMsg && geminiClients.length === 0) {
+        res.status(500).json({ error: `中转 API 调用失败: ${relayErrorMsg}` });
+        return;
+      }
+
       let userFriendlyMsg = `Gemini API 调用失败: ${rawErr || 'AI 识别服务未响应'}`;
       if (rawErr.includes('429') || rawErr.includes('RESOURCE_EXHAUSTED') || rawErr.includes('Quota')) {
-        userFriendlyMsg = 'Gemini API 免费层级调用频次受限 (429 Quota Exceeded)，请稍后再试或配置付费 Key';
+        if (relayErrorMsg) {
+          userFriendlyMsg = `中转 API 失败 (${relayErrorMsg})，且官方免费 Key 已达到调用上限`;
+        } else {
+          userFriendlyMsg = 'Gemini API 免费层级调用频次受限 (429 Quota Exceeded)，请稍后再试或配置付费 Key';
+        }
+      } else if (relayErrorMsg) {
+        userFriendlyMsg = `中转 API 报错: ${relayErrorMsg}`;
       }
       res.status(500).json({ error: userFriendlyMsg });
       return;
