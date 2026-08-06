@@ -65,7 +65,7 @@ async function callRelayAPI(cleanBase64: string, mimeType: string, promptText: s
   console.log(`Attempting Relay API call (${baseUrl}) with model '${model}'...`);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 9000);
+  const timeoutId = setTimeout(() => controller.abort(), 40000);
 
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -219,7 +219,7 @@ Return JSON format with a 'cards' array.`;
       };
       const textPart = { text: promptText };
 
-      const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 10000): Promise<T> => {
+      const callWithTimeout = <T>(promise: Promise<T>, timeoutMs = 35000): Promise<T> => {
         return Promise.race([
           promise,
           new Promise<T>((_, reject) =>
