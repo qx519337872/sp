@@ -27,11 +27,83 @@ export const ResultSynthesizer: React.FC<Props> = ({
   const [shareSuccess, setShareSuccess] = useState(false);
   const [autoCrop, setAutoCrop] = useState(true); // Default auto-crop on to cut off legs/basket at bottom
 
+  const [styleSeed, setStyleSeed] = useState<number>(() => Math.floor(Math.random() * 1000));
+  const [activeProfileName, setActiveProfileName] = useState<string>('');
+
   useEffect(() => {
     if (!originalImageSrc) return;
 
     let isMounted = true;
     setIsGenerating(true);
+
+    // 6 distinct penmanship profiles simulating different people's handwriting
+    const HANDWRITING_PROFILES = [
+      {
+        name: '行草流畅笔迹',
+        fontEn: '"MyCustomFont", "Caveat", "Indie Flower", cursive, sans-serif',
+        fontCn: '"MyCustomFont", "Zhi Mang Xing", "Long Cang", cursive, sans-serif',
+        baseAngle: -5.5,
+        spacingRatio: 0.92,
+        sizeScale: 1.05,
+        inkColor: '#0e43bd',
+        yWobble: 0.8,
+      },
+      {
+        name: '工整美工笔迹',
+        fontEn: '"MyCustomFont", "Architects Daughter", "Patrick Hand", cursive, sans-serif',
+        fontCn: '"MyCustomFont", "Long Cang", "Ma Shan Zheng", cursive, sans-serif',
+        baseAngle: -2.0,
+        spacingRatio: 0.95,
+        sizeScale: 0.98,
+        inkColor: '#10368a',
+        yWobble: 0.4,
+      },
+      {
+        name: '随性圆润笔迹',
+        fontEn: '"MyCustomFont", "Patrick Hand", "Caveat", cursive, sans-serif',
+        fontCn: '"MyCustomFont", "Ma Shan Zheng", "Zhi Mang Xing", cursive, sans-serif',
+        baseAngle: -3.8,
+        spacingRatio: 0.90,
+        sizeScale: 1.02,
+        inkColor: '#164dbf',
+        yWobble: 0.9,
+      },
+      {
+        name: '纤细清秀笔迹',
+        fontEn: '"MyCustomFont", "Shadows Into Light", "Architects Daughter", cursive, sans-serif',
+        fontCn: '"MyCustomFont", "Long Cang", "Zhi Mang Xing", cursive, sans-serif',
+        baseAngle: -4.5,
+        spacingRatio: 0.94,
+        sizeScale: 1.0,
+        inkColor: '#0a3cb3',
+        yWobble: 0.5,
+      },
+      {
+        name: '自然手帐笔迹',
+        fontEn: '"MyCustomFont", "Indie Flower", "Patrick Hand", cursive, sans-serif',
+        fontCn: '"MyCustomFont", "Zhi Mang Xing", "Ma Shan Zheng", cursive, sans-serif',
+        baseAngle: -3.2,
+        spacingRatio: 0.91,
+        sizeScale: 1.04,
+        inkColor: '#1141b8',
+        yWobble: 0.7,
+      },
+      {
+        name: '深蓝凝墨笔迹',
+        fontEn: '"MyCustomFont", "Caveat", "Shadows Into Light", cursive, sans-serif',
+        fontCn: '"MyCustomFont", "Ma Shan Zheng", "Long Cang", cursive, sans-serif',
+        baseAngle: -6.0,
+        spacingRatio: 0.93,
+        sizeScale: 1.03,
+        inkColor: '#0c2e82',
+        yWobble: 0.6,
+      },
+    ];
+
+    const currentProfile = HANDWRITING_PROFILES[Math.abs(styleSeed) % HANDWRITING_PROFILES.length];
+    if (isMounted) {
+      setActiveProfileName(currentProfile.name);
+    }
 
     const renderCanvas = (img: HTMLImageElement) => {
       if (!isMounted) return;
@@ -84,8 +156,8 @@ export const ResultSynthesizer: React.FC<Props> = ({
       ctx.drawImage(img, cropSx, cropSy, cropSw, cropSh, 0, 0, cropSw, cropSh);
 
       const shortSide = Math.min(canvas.width, canvas.height);
-      const fontSizeBig = Math.round(shortSide * 0.072);
-      const fontSizeMid = Math.round(shortSide * 0.045);
+      const fontSizeBig = Math.round(shortSide * 0.072 * currentProfile.sizeScale);
+      const fontSizeMid = Math.round(shortSide * 0.045 * currentProfile.sizeScale);
       const padding = Math.round(shortSide * 0.035);
 
       // Format text values with thousands comma separators from the right (e.g. 2,020 or 4,810)
@@ -100,13 +172,9 @@ export const ResultSynthesizer: React.FC<Props> = ({
       }
       const countStr = `${itemCount}件`;
 
-      // Hand writing fonts: 'MyCustomFont' defined in backend index.css is loaded first if uploaded by owner!
-      // 'Caveat', 'Architects Daughter', 'Patrick Hand' render authentic slender ballpoint/gel-pen digits without crossbar on '7'
-      const fontEn = '"MyCustomFont", "Caveat", "Architects Daughter", "Patrick Hand", "Shadows Into Light", "Indie Flower", cursive, sans-serif';
-      const fontCn = '"MyCustomFont", "Zhi Mang Xing", "Long Cang", "Ma Shan Zheng", cursive, sans-serif';
-      
-      // Gel pen / ballpoint ink color matching sample photo (#0f4dc7)
-      const inkColorPrimary = '#0f4dc7';
+      const fontEn = currentProfile.fontEn;
+      const fontCn = currentProfile.fontCn;
+      const inkColorPrimary = currentProfile.inkColor;
 
       ctx.save();
       ctx.font = `400 ${fontSizeBig}px ${fontEn}`;
@@ -128,7 +196,7 @@ export const ResultSynthesizer: React.FC<Props> = ({
 
       // Soft paper-like clean backdrop pad with slight rounded corners
       ctx.save();
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.93)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
       const r = padding * 0.5;
       ctx.beginPath();
       ctx.moveTo(boxX - padding * 0.5 + r, boxY - padding * 0.5);
@@ -143,14 +211,20 @@ export const ResultSynthesizer: React.FC<Props> = ({
       ctx.stroke();
       ctx.restore();
 
-      // Slender, slanted gel pen handwriting rendering matching sample photo 1 & 2
+      // Deterministic pseudo-random helper for character-by-character handwriting jitter
+      const pseudoRandom = (seed: number) => {
+        const x = Math.sin(seed * 9999 + 123.45) * 10000;
+        return x - Math.floor(x);
+      };
+
+      // Real gel pen / ballpoint pen handwriting simulator
       const drawHandwrittenText = (
         text: string,
         x: number,
         y: number,
         fSize: number,
         fontFamily: string,
-        baseAngleDeg = -4.0 // Natural forward slant for right-handed speed pen handwriting
+        baseAngleDeg = currentProfile.baseAngle
       ) => {
         ctx.save();
         ctx.translate(x, y);
@@ -158,26 +232,44 @@ export const ResultSynthesizer: React.FC<Props> = ({
         ctx.font = `400 ${fSize}px ${fontFamily}`;
         ctx.textBaseline = 'alphabetic';
         ctx.textAlign = 'left';
-        ctx.fillStyle = inkColorPrimary;
-        ctx.globalAlpha = 0.96;
 
         let cursorX = 0;
         const chars = String(text).split('');
+
         for (let i = 0; i < chars.length; i++) {
           const char = chars[i];
           const charW = ctx.measureText(char).width;
+          const charCode = char.charCodeAt(0);
+
+          // Unique seed per character
+          const seedI = styleSeed * 100 + i * 13 + charCode;
+          const r1 = pseudoRandom(seedI);
+          const r2 = pseudoRandom(seedI + 1);
+          const r3 = pseudoRandom(seedI + 2);
+          const r4 = pseudoRandom(seedI + 3);
+
+          // Character jitter parameters
+          const charAngle = (r1 - 0.5) * 3.5 * (Math.PI / 180); // ±1.75 deg individual tilt
+          const charY = (r2 - 0.5) * currentProfile.yWobble * 2.2; // Y baseline wobble
+          const charScale = 0.96 + r3 * 0.08; // 0.96x - 1.04x size scale
 
           ctx.save();
-          // Subtle organic character variation
-          const charAngle = Math.sin(i * 1.7 + x) * 1.2 * (Math.PI / 180);
-          const charY = Math.cos(i * 2.5 + y) * 0.4;
-
           ctx.translate(cursorX, charY);
           ctx.rotate(charAngle);
+          ctx.scale(charScale, charScale);
+
+          // 1. Faint pen pressure under-layer (ballpoint pen ink friction effect)
+          ctx.fillStyle = inkColorPrimary;
+          ctx.globalAlpha = 0.22;
+          ctx.fillText(char, 0.3, 0.2);
+
+          // 2. Main crisp gel-pen ink layer
+          ctx.globalAlpha = 0.95;
           ctx.fillText(char, 0, 0);
+
           ctx.restore();
 
-          cursorX += charW * 0.93; // Natural character spacing for handwritten pen
+          cursorX += charW * currentProfile.spacingRatio + (r4 - 0.5) * 0.8;
         }
         ctx.restore();
       };
@@ -186,9 +278,9 @@ export const ResultSynthesizer: React.FC<Props> = ({
       const leftX = boxX;
       const rightX = boxX + leftColW + padding * 0.9;
 
-      drawHandwrittenText(dateMD, leftX, boxY + fontSizeMid * 0.9, fontSizeMid, fontEn, -4.5);
-      drawHandwrittenText(countStr, leftX, boxY + fontSizeMid * 0.9 + fontSizeMid * 1.2, fontSizeMid, fontCn, -4.5);
-      drawHandwrittenText(totalStr, rightX, boxY + fontSizeBig * 0.9, fontSizeBig, fontEn, -4.0);
+      drawHandwrittenText(dateMD, leftX, boxY + fontSizeMid * 0.9, fontSizeMid, fontEn, currentProfile.baseAngle);
+      drawHandwrittenText(countStr, leftX, boxY + fontSizeMid * 0.9 + fontSizeMid * 1.2, fontSizeMid, fontCn, currentProfile.baseAngle);
+      drawHandwrittenText(totalStr, rightX, boxY + fontSizeBig * 0.9, fontSizeBig, fontEn, currentProfile.baseAngle + 0.3);
 
       try {
         const url = canvas.toDataURL('image/jpeg', 0.92);
@@ -269,7 +361,13 @@ export const ResultSynthesizer: React.FC<Props> = ({
     return () => {
       isMounted = false;
     };
-  }, [originalImageSrc, totalAmount, itemCount, summaryDate, cards, autoCrop]);
+  }, [originalImageSrc, totalAmount, itemCount, summaryDate, cards, autoCrop, styleSeed]);
+
+  // Handle switching handwriting penmanship style
+  const handleRandomizeStyle = () => {
+    setIsGenerating(true);
+    setStyleSeed((prev) => prev + 1);
+  };
 
   // Directly save / share to photo album
   const handleSaveToGallery = async () => {
@@ -356,6 +454,25 @@ export const ResultSynthesizer: React.FC<Props> = ({
         )}
       </div>
 
+
+      {/* Handwriting Style Changer Bar */}
+      <div className="flex items-center justify-between w-full bg-[#fdf8f9] border border-[#f0e2e6] rounded-2xl p-2.5 mb-3">
+        <div className="flex items-center gap-1.5 text-xs text-[#6e4e59] font-medium pl-1">
+          <Sparkles className="w-3.5 h-3.5 text-[#d6a5b5]" />
+          <span>当前字迹：</span>
+          <span className="font-bold text-[#8c5264]">{activeProfileName || '真实蓝墨水笔迹'}</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleRandomizeStyle}
+          disabled={isGenerating}
+          className="flex items-center gap-1 py-1.5 px-3 rounded-full bg-[#d6a5b5]/15 hover:bg-[#d6a5b5]/25 active:scale-95 text-[#8c5264] font-bold text-xs transition-all disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
+          <span>换个字迹 (模仿不同人)</span>
+        </button>
+      </div>
 
       {/* Two Action Buttons: Left = 重新选图, Right = 保存至手机相册 */}
       <div className="flex items-center gap-2 sm:gap-3 w-full">
