@@ -194,7 +194,8 @@ export const ResultSynthesizer: React.FC<Props> = ({
       const boxX = canvas.width - padding * 1.2 - blockW;
       const boxY = canvas.height - padding * 1.2 - blockH;
 
-      // Soft paper-like clean backdrop pad with slight rounded corners
+      // [Temporarily disabled] Soft paper-like clean backdrop pad with slight rounded corners
+      /*
       ctx.save();
       ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
       const r = padding * 0.5;
@@ -210,6 +211,7 @@ export const ResultSynthesizer: React.FC<Props> = ({
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.restore();
+      */
 
       // Deterministic pseudo-random helper for character-by-character handwriting jitter
       const pseudoRandom = (seed: number) => {
